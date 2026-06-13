@@ -160,8 +160,8 @@ const TRANSLATIONS = {
     smsSending: 'Sending',
     smsDismiss: 'DISMISS',
     smsSimulated: '📡 Demo mode — SMS alert simulated (real SMS integration in production)',
-    smsSuperiorName: 'DSP Anudit Khatri',
-    smsSuperiorPhone: '9851291019',
+    smsSuperiorName: 'DIGP BHUPENDRA BAHADUR KHATRI',
+    smsSuperiorPhone: '98512345678',
     smsSentTo: 'SMS Alert Sent to Superior',
     smsIncidentDetails: 'INCIDENT DETAILS',
     smsNode: 'Node',
@@ -261,8 +261,8 @@ const TRANSLATIONS = {
     smsSending: 'पठाउँदै',
     smsDismiss: 'बन्द गर्नुहोस्',
     smsSimulated: '📡 डेमो मोड — SMS सूचना अनुकरण (वास्तविक SMS उत्पादनमा)',
-    smsSuperiorName: 'डीएसपी अनुदित खत्री',
-    smsSuperiorPhone: '9851291019',
+    smsSuperiorName: 'डीआईजीपी भुपेन्द्र बहादुर खत्री',
+    smsSuperiorPhone: '98512345678',
     smsSentTo: 'वरिष्ठ अधिकारीलाई SMS पठाइयो',
     smsIncidentDetails: 'घटना विवरण',
     smsNode: 'नोड',
@@ -2363,6 +2363,8 @@ export default function App() {
         getCategoryInfo={getCategoryInfo}
         openInGMaps={openInGMaps}
         t={t}
+        superiorName={t.smsSuperiorName}
+        superiorPhone={t.smsSuperiorPhone}
       />}
     </div>
   );

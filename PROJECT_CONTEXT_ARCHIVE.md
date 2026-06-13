@@ -223,6 +223,11 @@ IDLE → SOS Received (Red LED flash 500ms) → ESP-NOW Send → Dashboard Alert
 - **Sequential Animation:** Auto-triggers on dispatch, showing a real-time cascading update chain: Hospital Services (🏥) -> Nepal Army Command (🪖) -> Armed Police Force - APF (🛡️) -> Local Volunteers Chain (🤝).
 - **Auto-Dismissal:** Uses React state tracking and a `useEffect` timeout to automatically dismiss the coordination box exactly 8 seconds after dispatch.
 
+### R. 2-Tiered Regional Alerting & Geofencing Orchestration
+- **Dynamic 15km Geofence Area:** Centered dynamically on the coordinates of any active `CRITICAL` severity incident (Landslide, Flood, Earthquake) in the region.
+- **Tier 1 (Wide-Area NTC SMS Broadcast):** Automatically triggers a simulated NTC SMS Cell Broadcast to all cellular devices inside the 15km warning radius, visualized on the Leaflet map as an animated, pulsating red warning wave.
+- **Tier 2 (Strategic Command Escalation):** Automatically initializes the NDRRMA/Army Escalation console panel overlay, displaying geofence impact statistics and enabling immediate dispatch of emergency data packets and CSV reports to district commands.
+
 ### D. Cached Village Module Coordinates
 | ID | Name | Latitude | Longitude |
 |----|------|----------|-----------|
@@ -526,7 +531,7 @@ cd ~/Desktop/Prahari_Link_Hackathon/dashboard && npm run dev
 | Phone BLE Acknowledgment | ✅ Live | Backend `phone_ble_ack` socket handler. Dashboard `bleConfirmedNodes` tracking. **📱 Phone Confirmed** vs **🔄 Simulated** badges on volunteer panel + incident cards. Scanner name + RSSI display. Auto-simulation fallback. Mock injector ~60% BLE ack simulation. |
 | Dashboard Incident Card Badges | ✅ Built | Active incident cards show **two badges**: 📡 BLE Broadcast (green pulsing) + 📱 Phone Confirmed (emerald static) when phone has detected the broadcast. |
 | APK v5 — Enhanced ACK + Volunteer BLE | ✅ Built v2 | Enhanced ACK dispatch parsing, volunteer registration screen, BLE scanning with `react-native-ble-plx`, volunteer mode with incident feed. `react-native-ble-plx` installed. |
-| Dashboard (v9) | ✅ Built | Move Agency Dispatch Coordination Tracker to Floating Map Overlay (`fixed top-16 right-4 z-[9999]`), sequential 4-agency status tracking animation with 8-second auto-dismiss, custom `MapLegend` relay and command control design, fixed duplicate node labels, and increased modal z-index levels. |
+| Dashboard (v9) | ✅ Built | Move Agency Dispatch Coordination Tracker to Floating Map Overlay (`fixed top-16 right-4 z-[9999]`), sequential 4-agency status tracking animation with 8-second auto-dismiss, 2-tiered regional alerting (15km animated Leaflet wave + NTC SMS broadcast animation + automated Strategic command escalation panel), custom `MapLegend` relay and command control design, fixed duplicate node labels, and increased modal z-index levels. |
 
 ---
 

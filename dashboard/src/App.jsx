@@ -568,7 +568,7 @@ function FloatingAgencyCoordination({ incident }) {
 
   return (
     <div 
-      className="fixed top-1/2 -translate-y-1/2 right-4 z-[9999] bg-gray-950/95 backdrop-blur-md border border-purple-500/30 rounded-2xl p-4 shadow-[0_10px_40px_rgba(168,85,247,0.25)] w-[260px]"
+      className="fixed top-[58%] -translate-y-1/2 right-4 z-[9999] bg-gray-950/95 backdrop-blur-md border border-purple-500/30 rounded-2xl p-4 shadow-[0_10px_40px_rgba(168,85,247,0.25)] w-[260px]"
       style={{ animation: 'sms-slide-in 0.4s ease-out' }}
     >
       <div className="flex items-center justify-between mb-2 pb-1 border-b border-gray-800">

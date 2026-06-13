@@ -20,12 +20,12 @@ const NODE_COLORS = {
   CMD_CTRL: '#a855f7',
 };
 
-const COVERAGE_RADIUS = 850; // Increased for slight overlap between adjacent nodes
+const COVERAGE_RADIUS = 800; // Actual coverage radius set to 0.8km for map display
 
 const sosIcon = new L.DivIcon({
   className: 'custom-sos-icon',
-  html: '<div style="display:flex;align-items:center;justify-content:center;width:48px;height:48px"><div style="position:absolute;width:48px;height:48px;border-radius:50%;background:rgba(239,68,68,0.25);animation:sos-ring-pulse 1.5s ease-out infinite"></div><div style="width:36px;height:36px;background:#ef4444;border-radius:50%;border:3px solid rgba(255,255,255,0.9);box-shadow:0 0 20px rgba(239,68,68,0.6),0 0 40px rgba(239,68,68,0.3);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;color:white;letter-spacing:1px;z-index:2">SOS</div></div>',
-  iconSize: [48, 48], iconAnchor: [24, 24],
+  html: '<div style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;background:#ef4444;border-radius:50%;border:3px solid rgba(255,255,255,0.9);box-shadow:0 0 20px rgba(239,68,68,0.6),0 0 40px rgba(239,68,68,0.3);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;color:white;letter-spacing:1px;z-index:2">SOS</div>',
+  iconSize: [36, 36], iconAnchor: [18, 18],
 });
 
 const ackIcon = new L.DivIcon({
@@ -61,12 +61,25 @@ const offlineIcon = new L.DivIcon({
 
 const cmdCtrlIcon = new L.DivIcon({
   className: 'custom-cmd-ctrl-icon',
-  html: '<div style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:#0f172a;border:2.5px solid #a855f7;border-radius:50%;box-shadow:0 0 15px rgba(168,85,247,0.7);font-size:16px;line-height:1">🚨</div>',
-  iconSize: [32, 32], iconAnchor: [16, 16],
+  html: '<div style="width:18px;height:18px;background:#000000;border-radius:50%;border:3px solid rgba(0,0,0,0.5);box-shadow:0 0 10px rgba(0,0,0,0.5)"></div>',
+  iconSize: [18, 18], iconAnchor: [9, 9],
+});
+
+const cmdCtrlBlinkIcon = new L.DivIcon({
+  className: 'custom-cmd-ctrl-icon-blink',
+  html: `
+    <div style="display:flex;align-items:center;justify-content:center;width:64px;height:64px">
+      <div class="sos-ripple ripple-1" style="background:rgba(168,85,247,0.4)"></div>
+      <div class="sos-ripple ripple-2" style="background:rgba(168,85,247,0.3)"></div>
+      <div class="sos-ripple ripple-3" style="background:rgba(168,85,247,0.2)"></div>
+      <div class="cmd-ctrl-blink" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:3px solid white;border-radius:50%;font-size:18px;line-height:1;z-index:10;position:relative">🚨</div>
+    </div>
+  `,
+  iconSize: [64, 64], iconAnchor: [32, 32],
 });
 
 // Helper to pick the right node icon based on heartbeat status
-function getNodeIcon(nodeId, nodeStatuses) {
+function getNodeIcon(nodeId, nodeStatuses, isBlinking = false) {
   if (nodeId === 'CMD_CTRL') return cmdCtrlIcon;
   const hb = nodeStatuses[nodeId];
   if (!hb || hb.elapsed === undefined) return idleIcon;
@@ -237,7 +250,7 @@ const TRANSLATIONS = {
     ndrrmAGenerate: 'CSV \u092C\u0928\u093E\u0909\u0928\u0941\u0939\u094B\u0938\u094D \u0930 \u092A\u0920\u093E\u0909\u0928\u0941\u0939\u094B\u0938\u094D',    ndrrmADone: '\u2705 NDRRMA\u092E\u093E \u092A\u0920\u093E\u0907\u092F\u094B',
     trainingToggle: '\u{1F9EA} \u0924\u093E\u0932\u093F\u092E \u092E\u094B\u0921',
     trainingOn: '\u{1F9EA} \u0924\u093E\u0932\u093F\u092E \u092E\u094B\u0921',
-    trainingOff: '\u{1F6A8} \u0924\u093E\u0932\u093F\u092E \u092C\u0928\u094D\u0926 \u0917\u0930\u094D\u0928\u0941\u0939\u094B\u0938\u094D',
+    trainingOff: '\u{1F6A8} \u0924\u093E\u0932\u093F\u092E \u092B\u0932\u094D\u0921 \u0917\u0930\u094D\u0928\u0941\u0939\u094B\u0938\u094D',
     trainingLabel: '\u0924\u093E\u0932\u093F\u092E',
     trainingExport: 'Training CSV',
     trainingClear: 'Training \u0921\u093E\u091F\u093E \u092E\u0947\u091F\u093E\u0909\u0928\u0941\u0939\u094B\u0938\u094D',
@@ -316,7 +329,7 @@ const TRANSLATIONS = {
     regionalOrchestration: 'क्षेत्रीय अलार्म समन्वय',
     telecomIntegration: 'क्षेत्रीय टेलिकम प्रसार',
     ntcStatusConnecting: 'NTC गेटवे API सँग जडान गर्दै...',
-    ntcStatusBroadcasting: '१५ किमि जियोफेन्समा SMS पठाउँदै...',
+    ntcStatusBroadcasting: '\u0967\u096B \u0915\u093F\u0921\u093F \u091C\u093F\u092F\u094B\u092B\u0947\u0928\u094D\u0938\u092E\u093E SMS \u092A\u0920\u093E\u0909\u0901\u0926\u0948...',
     ntcStatusComplete: 'SMS ब्रोडकास्ट सम्पन्न भयो',
     strategicEscalation: 'रणनीतिक NDRRMA/सेना उच्च स्तर',
     affectedArea: 'चेतावनी क्षेत्र',
@@ -462,7 +475,7 @@ function CoverageOverlay({ nodes, activeNodeIDs }) {
             <div className="text-gray-900 text-[11px]">
               <div className="font-bold text-sm" style={{color: NODE_COLORS[node.id]}}>{node.id}</div>
               <div className="text-gray-600 mt-1">{node.name}</div>
-              <div className="text-gray-500 mt-1">Coverage radius: {(COVERAGE_RADIUS/1000).toFixed(1)}km</div>
+              <div className="text-gray-500 mt-1">Coverage radius: 20km</div>
               <div className="text-gray-500">Covers surrounding village area</div>
             </div>
           </Popup>
@@ -501,7 +514,7 @@ function MapLegend() {
         </div>
         <div className="flex items-center justify-between gap-3 border-t border-gray-800/60 pt-1.5 mt-1">
           <div className="flex items-center gap-2">
-            <span className="text-xs">🚨</span>
+            <div className="w-2 h-2 rounded-full bg-black border border-gray-600" />
             <span className="text-gray-400 font-semibold">HQ Command</span>
           </div>
           <span className="text-[8px] text-purple-400 font-mono">Control</span>
@@ -555,7 +568,7 @@ function FloatingAgencyCoordination({ incident }) {
 
   return (
     <div 
-      className="fixed top-16 right-4 z-[9999] bg-gray-950/95 backdrop-blur-md border border-purple-500/30 rounded-2xl p-4 shadow-[0_10px_40px_rgba(168,85,247,0.25)] w-[260px]"
+      className="fixed top-1/2 -translate-y-1/2 right-4 z-[9999] bg-gray-950/95 backdrop-blur-md border border-purple-500/30 rounded-2xl p-4 shadow-[0_10px_40px_rgba(168,85,247,0.25)] w-[260px]"
       style={{ animation: 'sms-slide-in 0.4s ease-out' }}
     >
       <div className="flex items-center justify-between mb-2 pb-1 border-b border-gray-800">
@@ -801,11 +814,14 @@ export default function App() {
   const [dismissedIncidentIds, setDismissedIncidentIds] = useState(new Set());
   const [ntcProgress, setNtcProgress] = useState(0);
   const [ntcStatus, setNtcStatus] = useState('initializing'); // 'connecting' | 'broadcasting' | 'complete'
+  const [isCmdCtrlBlinking, setIsCmdCtrlBlinking] = useState(false);
 
   useEffect(() => {
     const criticals = incidents.filter(inc => {
       const cat = getCategoryInfo(inc);
-      return cat.severity === 'CRITICAL' && inc.status !== 'resolved' && !inc.fir_number && !dismissedIncidentIds.has(inc.alert_id || `${inc.nodeID}-${inc.timestamp}`);
+      const isAcknowledged = inc.status === 'dispatched' || inc.status === 'acknowledged' || inc.status === 'escalated';
+      const isRecentlyDispatched = inc.dispatchedAt && (Date.now() - inc.dispatchedAt < 8000);
+      return cat.severity === 'CRITICAL' && isAcknowledged && isRecentlyDispatched && !inc.fir_number && !dismissedIncidentIds.has(inc.alert_id || `${inc.nodeID}-${inc.timestamp}`);
     });
     if (criticals.length > 0) {
       const latest = [...criticals].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
@@ -828,6 +844,7 @@ export default function App() {
     // Simulate NTC Broadcast steps
     const t1 = setTimeout(() => {
       setNtcStatus('broadcasting');
+      setIsCmdCtrlBlinking(true); // Start radiating during broadcast
     }, 1500);
 
     const interval = setInterval(() => {
@@ -835,6 +852,19 @@ export default function App() {
         if (prev >= 100) {
           clearInterval(interval);
           setNtcStatus('complete');
+          setIsCmdCtrlBlinking(true);
+          
+          // Auto-close panel after completion
+          setTimeout(() => {
+            const activeKey = activeCriticalIncident.alert_id || `${activeCriticalIncident.nodeID}-${activeCriticalIncident.timestamp}`;
+            setDismissedIncidentIds(prevDismissed => new Set([...prevDismissed, activeKey]));
+            
+            // Keep CMD_CTRL radiating for another 5 seconds after panel closes
+            setTimeout(() => {
+              setIsCmdCtrlBlinking(false);
+            }, 5000);
+          }, 800); // Small delay before closing panel to show "COMPLETE" status
+          
           return 100;
         }
         return prev + 10;
@@ -2162,7 +2192,7 @@ export default function App() {
             const isEscalated = activeIncident?.status === 'escalated';
             const isDispatched = activeIncident?.status === 'acknowledged' || activeIncident?.status === 'dispatched';
             
-            let icon = getNodeIcon(node.id, nodeStatuses);
+            let icon = getNodeIcon(node.id, nodeStatuses, isCmdCtrlBlinking);
             
             return (
               <Marker key={node.id} position={node.coords} icon={icon}>
@@ -2254,26 +2284,6 @@ export default function App() {
           <MapLegend />
           <NodeLabels nodes={[...STATIC_NODES, ...dynamicNodes.filter(dn => !STATIC_NODES.some(sn => sn.id === dn.id))]} />
           <MapResizer />
-
-          {/* Dynamic 15km Geofenced Warning Zones for CRITICAL active incidents */}
-          {incidents.filter(inc => {
-            const cat = getCategoryInfo(inc);
-            return cat.severity === 'CRITICAL' && inc.status !== 'resolved' && !inc.fir_number && inc.coords && inc.coords[0] && inc.coords[1];
-          }).map(inc => (
-            <Circle
-              key={`ntc-wave-${inc.alert_id || `${inc.nodeID}-${inc.timestamp}`}`}
-              center={inc.coords}
-              radius={15000}
-              pathOptions={{
-                color: '#ef4444',
-                fillColor: '#ef4444',
-                fillOpacity: 0.08,
-                className: 'ntc-alert-wave-pulse',
-                weight: 1.5,
-                dashArray: '6, 6'
-              }}
-            />
-          ))}
         </MapContainer>
 
         <div className="absolute top-4 right-4 z-[1000] bg-gray-900/90 backdrop-blur-sm px-3 py-2 rounded-xl border border-gray-800 text-xs flex items-center gap-3">

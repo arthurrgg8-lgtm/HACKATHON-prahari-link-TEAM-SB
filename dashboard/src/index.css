@@ -25,24 +25,6 @@
   border: none !important;
 }
 
-.sos-marker-ring {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.sos-marker-ring::before {
-  content: '';
-  position: absolute;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: rgba(239, 68, 68, 0.25);
-  animation: sos-ring-pulse 1.5s ease-out infinite;
-}
-
 .sos-marker-dot {
   width: 20px;
   height: 20px;
@@ -189,6 +171,24 @@
 .overflow-y-auto::-webkit-scrollbar-thumb {
   background: #374151;
   border-radius: 2px;
+}
+
+/* Command Center Final Alert Blink */
+.cmd-ctrl-blink {
+  animation: cmd-blink 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes cmd-blink {
+  0% {
+    box-shadow: 0 0 15px rgba(168, 85, 247, 0.7);
+    transform: scale(1);
+    background: #0f172a;
+  }
+  100% {
+    box-shadow: 0 0 40px rgba(168, 85, 247, 1), 0 0 70px rgba(168, 85, 247, 0.4);
+    transform: scale(1.25);
+    background: #a855f7;
+  }
 }
 
 /* NTC 15km Alert Wave Pulse Animation */

@@ -112,7 +112,8 @@ void startBLEAlertBroadcast(const char* nodeID, const char* category, float lat,
     // Format: "P|NA|LS|27.6945,83.4457" — short enough for BLE advert (~29 bytes)
     char advPayload[32];
     // Use compressed nodeID (last char) and category (2-letter code)
-    const char* shortNode = nodeID + strlen(nodeID) - 1; // Last char: A, B, C, or L (CMD_CTRL)
+    size_t nodeLen = strlen(nodeID);
+    const char* shortNode = (nodeLen > 0) ? (nodeID + nodeLen - 1) : "U"; // Last char: A, B, C, or L (CMD_CTRL)
     const char* shortCat = category;
     // Map categories to 2-letter codes
     if (strcmp(category, "LANDSLIDE") == 0) shortCat = "LS";

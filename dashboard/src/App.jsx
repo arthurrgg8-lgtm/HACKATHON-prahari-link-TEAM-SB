@@ -2402,36 +2402,6 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-
-                {/* Tier 2: Strategic escalation status */}
-                <div>
-                  <div className="text-[9px] uppercase font-bold text-gray-500 mb-1.5 tracking-wider">
-                    {t.strategicEscalation}
-                  </div>
-                  <div className="p-2.5 bg-gray-900/60 border border-gray-800 rounded-xl space-y-2">
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-gray-400">{t.packetStatus}:</span>
-                      <span className="text-purple-400 font-semibold font-mono animate-pulse">{t.readyToDispatch}</span>
-                    </div>
-                    
-                    <div className="font-mono text-[8px] text-gray-500 leading-tight space-y-0.5">
-                      <div>&gt; Affected Area: ~706.8 sq km</div>
-                      <div>&gt; Impact: Regionally Significant alert status</div>
-                      <div>&gt; Target: NDRRMA & Nepal Army HQ</div>
-                    </div>
-
-                    <button 
-                      onClick={() => {
-                        setPendingNDRRMANodeID(inc.nodeID);
-                        setNdrrmAConfirmed(false);
-                        setShowNDRRMAForm(true);
-                      }}
-                      className="w-full mt-1 py-2 bg-purple-700 hover:bg-purple-600 active:bg-purple-800 text-white text-[10px] font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 border border-purple-500/30"
-                    >
-                      🚀 {t.dispatchPacket}
-                    </button>
-                  </div>
-                </div>
               </div>
             </div>
           );

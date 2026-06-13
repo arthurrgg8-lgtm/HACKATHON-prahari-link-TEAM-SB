@@ -453,31 +453,36 @@ function CoverageOverlay({ nodes, activeNodeIDs }) {
 
 function MapLegend() {
   return (
-    <div className="absolute bottom-4 right-4 z-[10000] bg-gray-900/85 backdrop-blur-sm px-3 py-2 rounded-xl border border-gray-700/50 text-[10px] shadow-lg pointer-events-auto">
-      <div className="font-bold text-gray-300 mb-1.5 text-[9px] uppercase tracking-wider">Coverage Legend</div>
-      <div className="space-y-1">
-        {Object.entries(NODE_COLORS).map(([id, color]) => (
-          <div key={id} className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-            <span className="text-gray-400">{id}</span>
+    <div className="absolute bottom-4 right-4 z-[10000] bg-gray-900/85 backdrop-blur-sm px-3 py-2.5 rounded-xl border border-gray-700/50 text-[10px] shadow-lg pointer-events-auto min-w-[140px]">
+      <div className="font-bold text-gray-300 mb-2 text-[9px] uppercase tracking-wider border-b border-gray-800 pb-1">Map Legend</div>
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-red-500" />
+            <span className="text-gray-400 font-semibold">Node A</span>
           </div>
-        ))}
-        <div className="border-t border-gray-700/40 my-1" />
-        <div className="flex items-center gap-2">
-          <svg width="20" height="4" viewBox="0 0 20 4">
-            <line x1="0" y1="2" x2="20" y2="2" stroke="#60a5fa" strokeWidth="1.5" strokeDasharray="4 3" />
-          </svg>
-          <span className="text-gray-400">Active link</span>
+          <span className="text-[8px] text-gray-600 font-mono">850m Relay</span>
         </div>
-        <div className="flex items-center gap-2">
-          <svg width="20" height="4" viewBox="0 0 20 4">
-            <line x1="0" y1="2" x2="20" y2="2" stroke="#60a5fa" strokeWidth="1" strokeDasharray="2 4" opacity="0.4" />
-          </svg>
-          <span className="text-gray-400">Idle link</span>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-blue-500" />
+            <span className="text-gray-400 font-semibold">Node B</span>
+          </div>
+          <span className="text-[8px] text-gray-600 font-mono">850m Relay</span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-          <span className="text-gray-400">Active alert</span>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-green-500" />
+            <span className="text-gray-400 font-semibold">Node C</span>
+          </div>
+          <span className="text-[8px] text-gray-600 font-mono">850m Relay</span>
+        </div>
+        <div className="flex items-center justify-between gap-3 border-t border-gray-800/60 pt-1.5 mt-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs">🚨</span>
+            <span className="text-gray-400 font-semibold">HQ Command</span>
+          </div>
+          <span className="text-[8px] text-purple-400 font-mono">Control</span>
         </div>
       </div>
     </div>

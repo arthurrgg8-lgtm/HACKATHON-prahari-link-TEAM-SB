@@ -201,6 +201,17 @@ const TRANSLATIONS = {
     phoneScannedBy: 'Scanned by',
     phoneRSSI: 'RSSI',
     simulatedBadge: '🧪 SIMULATED',
+    regionalOrchestration: 'Regional Alert Orchestration',
+    telecomIntegration: 'Wide-Area Telecom Dissemination',
+    ntcStatusConnecting: 'Connecting to NTC Gateway API...',
+    ntcStatusBroadcasting: 'Broadcasting SMS to 15km Geofence...',
+    ntcStatusComplete: 'Wide-Area SMS Broadcast Complete',
+    strategicEscalation: 'Strategic NDRRMA/Army Escalation',
+    affectedArea: 'Warning Area',
+    impactSummary: 'Impact Telemetry',
+    dispatchPacket: 'DISPATCH ESCALATION PACKET',
+    packetStatus: 'Packet Status',
+    readyToDispatch: 'Ready to Dispatch',
   },
   ne: {
     title: '\u092A\u094D\u0930\u0939\u0930\u0940-\u0932\u093F\u0902\u0915', subtitle: '\u092A\u094D\u0930\u0939\u0930\u0940 \u0915\u092E\u093E\u0923\u094D\u0921 \u0938\u0947\u0928\u094D\u091F\u0930',
@@ -302,6 +313,17 @@ const TRANSLATIONS = {
     phoneScannedBy: 'स्क्यान गर्यो',
     phoneRSSI: 'RSSI',
     simulatedBadge: '🧪 अनुकरण',
+    regionalOrchestration: 'क्षेत्रीय अलार्म समन्वय',
+    telecomIntegration: 'क्षेत्रीय टेलिकम प्रसार',
+    ntcStatusConnecting: 'NTC गेटवे API सँग जडान गर्दै...',
+    ntcStatusBroadcasting: '१५ किमि जियोफेन्समा SMS पठाउँदै...',
+    ntcStatusComplete: 'SMS ब्रोडकास्ट सम्पन्न भयो',
+    strategicEscalation: 'रणनीतिक NDRRMA/सेना उच्च स्तर',
+    affectedArea: 'चेतावनी क्षेत्र',
+    impactSummary: 'प्रभाव मापन',
+    dispatchPacket: 'उच्च स्तर प्याकेट पठाउनुहोस्',
+    packetStatus: 'प्याकेट स्थिति',
+    readyToDispatch: 'पठाउन तयार',
   },
 };
 
@@ -774,6 +796,56 @@ export default function App() {
       setCurrentDispatchedIncident(null);
     }
   }, [incidents]);
+
+  const [activeCriticalIncident, setActiveCriticalIncident] = useState(null);
+  const [dismissedIncidentIds, setDismissedIncidentIds] = useState(new Set());
+  const [ntcProgress, setNtcProgress] = useState(0);
+  const [ntcStatus, setNtcStatus] = useState('initializing'); // 'connecting' | 'broadcasting' | 'complete'
+
+  useEffect(() => {
+    const criticals = incidents.filter(inc => {
+      const cat = getCategoryInfo(inc);
+      return cat.severity === 'CRITICAL' && inc.status !== 'resolved' && !inc.fir_number && !dismissedIncidentIds.has(inc.alert_id || `${inc.nodeID}-${inc.timestamp}`);
+    });
+    if (criticals.length > 0) {
+      const latest = [...criticals].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+      setActiveCriticalIncident(latest);
+    } else {
+      setActiveCriticalIncident(null);
+    }
+  }, [incidents, dismissedIncidentIds]);
+
+  useEffect(() => {
+    if (!activeCriticalIncident) {
+      setNtcProgress(0);
+      setNtcStatus('initializing');
+      return;
+    }
+
+    setNtcProgress(0);
+    setNtcStatus('connecting');
+
+    // Simulate NTC Broadcast steps
+    const t1 = setTimeout(() => {
+      setNtcStatus('broadcasting');
+    }, 1500);
+
+    const interval = setInterval(() => {
+      setNtcProgress(prev => {
+        if (prev >= 100) {
+          clearInterval(interval);
+          setNtcStatus('complete');
+          return 100;
+        }
+        return prev + 10;
+      });
+    }, 350);
+
+    return () => {
+      clearTimeout(t1);
+      clearInterval(interval);
+    };
+  }, [activeCriticalIncident]);
 
   // Dynamically derive nodes from heartbeats/statuses
   const dynamicNodes = React.useMemo(() => {
@@ -2182,6 +2254,26 @@ export default function App() {
           <MapLegend />
           <NodeLabels nodes={[...STATIC_NODES, ...dynamicNodes.filter(dn => !STATIC_NODES.some(sn => sn.id === dn.id))]} />
           <MapResizer />
+
+          {/* Dynamic 15km Geofenced Warning Zones for CRITICAL active incidents */}
+          {incidents.filter(inc => {
+            const cat = getCategoryInfo(inc);
+            return cat.severity === 'CRITICAL' && inc.status !== 'resolved' && !inc.fir_number && inc.coords && inc.coords[0] && inc.coords[1];
+          }).map(inc => (
+            <Circle
+              key={`ntc-wave-${inc.alert_id || `${inc.nodeID}-${inc.timestamp}`}`}
+              center={inc.coords}
+              radius={15000}
+              pathOptions={{
+                color: '#ef4444',
+                fillColor: '#ef4444',
+                fillOpacity: 0.08,
+                className: 'ntc-alert-wave-pulse',
+                weight: 1.5,
+                dashArray: '6, 6'
+              }}
+            />
+          ))}
         </MapContainer>
 
         <div className="absolute top-4 right-4 z-[1000] bg-gray-900/90 backdrop-blur-sm px-3 py-2 rounded-xl border border-gray-800 text-xs flex items-center gap-3">
@@ -2201,6 +2293,139 @@ export default function App() {
         </div>
 
         {currentDispatchedIncident && <FloatingAgencyCoordination incident={currentDispatchedIncident} />}
+
+        {/* Dynamic 2-Tiered Regional Alerting / Orchestration Panel */}
+        {activeCriticalIncident && (() => {
+          const inc = activeCriticalIncident;
+          const cat = getCategoryInfo(inc);
+          const activeKey = inc.alert_id || `${inc.nodeID}-${inc.timestamp}`;
+          
+          return (
+            <div 
+              className="absolute top-16 right-4 z-[1000] w-[320px] bg-gray-950/90 backdrop-blur-lg border border-red-500/30 rounded-2xl p-4 shadow-[0_15px_50px_rgba(239,68,68,0.25)] transition-all duration-500 transform translate-x-0"
+              style={{ animation: 'sms-slide-in 0.4s ease-out' }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <div className="flex items-center gap-2">
+                  <span className="text-red-500 animate-pulse text-xs">📡</span>
+                  <span className="text-[9px] font-bold text-red-400 uppercase tracking-wider font-mono">
+                    {t.regionalOrchestration}
+                  </span>
+                </div>
+                <button 
+                  onClick={() => setDismissedIncidentIds(prev => new Set([...prev, activeKey]))}
+                  className="p-1 hover:bg-gray-800 rounded-lg text-gray-500 hover:text-white transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              {/* Telemetry info */}
+              <div className="space-y-3">
+                <div className="p-2.5 bg-red-950/20 border border-red-900/30 rounded-xl">
+                  <div className="flex justify-between text-[10px] mb-1">
+                    <span className="text-gray-500">Incident Node:</span>
+                    <span className="font-bold text-red-400 font-mono">{inc.nodeID}</span>
+                  </div>
+                  <div className="flex justify-between text-[10px] mb-1">
+                    <span className="text-gray-500">Incident Type:</span>
+                    <span className="text-gray-200 font-semibold">{cat.label}</span>
+                  </div>
+                  <div className="flex justify-between text-[10px] mb-1">
+                    <span className="text-gray-500">{t.affectedArea}:</span>
+                    <span className="text-gray-300 font-mono">15 km Radius</span>
+                  </div>
+                  {inc.coords && (
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-gray-500">Center Coords:</span>
+                      <span 
+                        className="text-blue-400 hover:underline cursor-pointer font-mono"
+                        onClick={() => openInGMaps(inc.coords[0], inc.coords[1])}
+                      >
+                        {inc.coords[0].toFixed(5)}, {inc.coords[1].toFixed(5)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Tier 1: Telecom Integration status */}
+                <div>
+                  <div className="text-[9px] uppercase font-bold text-gray-500 mb-1.5 tracking-wider">
+                    {t.telecomIntegration}
+                  </div>
+                  <div className="p-2.5 bg-gray-900/60 border border-gray-800 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-gray-400">NTC SMS Gateway API</span>
+                      <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded-full ${
+                        ntcStatus === 'complete' ? 'bg-green-600/20 text-green-400 font-bold' :
+                        ntcStatus === 'broadcasting' ? 'bg-blue-600/20 text-blue-400 animate-pulse font-semibold' :
+                        'bg-yellow-600/20 text-yellow-400'
+                      }`}>
+                        {ntcStatus === 'complete' ? 'COMPLETE' : ntcStatus === 'broadcasting' ? 'SENDING' : 'CONNECTING'}
+                      </span>
+                    </div>
+                    {/* Progress bar */}
+                    <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          ntcStatus === 'complete' ? 'bg-green-500' : 'bg-blue-500'
+                        }`}
+                        style={{ width: `${ntcProgress}%` }}
+                      />
+                    </div>
+                    {/* high-tech subtext log */}
+                    <div className="font-mono text-[8px] text-gray-500 leading-tight space-y-0.5">
+                      {ntcStatus === 'connecting' && <div>&gt; {t.ntcStatusConnecting || 'Connecting to NTC Gateway API...'}</div>}
+                      {ntcStatus === 'broadcasting' && (
+                        <>
+                          <div>&gt; {t.ntcStatusBroadcasting || 'Broadcasting SMS to 15km Geofence...'}</div>
+                          <div>&gt; SMS Queue: {ntcProgress}% dispatched</div>
+                        </>
+                      )}
+                      {ntcStatus === 'complete' && (
+                        <>
+                          <div>&gt; Broadcast finished inside 15km geofence.</div>
+                          <div className="text-green-400 font-semibold">&gt; {t.ntcStatusComplete}</div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tier 2: Strategic escalation status */}
+                <div>
+                  <div className="text-[9px] uppercase font-bold text-gray-500 mb-1.5 tracking-wider">
+                    {t.strategicEscalation}
+                  </div>
+                  <div className="p-2.5 bg-gray-900/60 border border-gray-800 rounded-xl space-y-2">
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-gray-400">{t.packetStatus}:</span>
+                      <span className="text-purple-400 font-semibold font-mono animate-pulse">{t.readyToDispatch}</span>
+                    </div>
+                    
+                    <div className="font-mono text-[8px] text-gray-500 leading-tight space-y-0.5">
+                      <div>&gt; Affected Area: ~706.8 sq km</div>
+                      <div>&gt; Impact: Regionally Significant alert status</div>
+                      <div>&gt; Target: NDRRMA & Nepal Army HQ</div>
+                    </div>
+
+                    <button 
+                      onClick={() => {
+                        setPendingNDRRMANodeID(inc.nodeID);
+                        setNdrrmAConfirmed(false);
+                        setShowNDRRMAForm(true);
+                      }}
+                      className="w-full mt-1 py-2 bg-purple-700 hover:bg-purple-600 active:bg-purple-800 text-white text-[10px] font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 border border-purple-500/30"
+                    >
+                      🚀 {t.dispatchPacket}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* NDRRMA Escalation Confirmation Modal */}

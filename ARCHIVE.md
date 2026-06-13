@@ -82,7 +82,7 @@ Use these to verify file integrity after transfer:
 50991b526b1eacb2b0afa26013154587  mobile_app/Prahari_Link_Demo_v4.apk
 1b11637718fe92ef23c5f3cad19ec7b7  backend/server.js
 8d69d48a8f22fb83e08b80a2e19d58cf  backend/database.js
-b55687a57682eebfef1f3c847d0cf9e8  dashboard/src/App.jsx
+0f7b457c2f6909a2cca14dcf541a6b87  dashboard/src/App.jsx
 70f8eb7fe9181f8df7ed0ec7c7abdedc  mobile_app/App.js
 bede706fb004cae9871d67c67fa6f491  firmware/production/relay_esp_a/relay_esp_a.ino
 8119db73f92c0d20df543b93c8c38b0d  firmware/production/hub_esp_b/hub_esp_b.ino
@@ -154,6 +154,10 @@ socket.emit('new_incident', { ...incident, source: 'simulated', status: 'active'
 
 #### `dashboard/src/App.jsx` — Siren and Drill Session Fixes
 - **Resolved** buzzer auto-stop behavior on resolution and added proper `alert_id` propagation for drill incidents.
+
+#### `dashboard/src/App.jsx` — 2-Tiered Regional Alerting & Geofencing Orchestration
+- **Implemented** dynamic 15km geofence "Alert Wave" pulsing circles in Leaflet centered on the incoming coordinates of active CRITICAL incidents.
+- **Created** a slide-out "Regional Alert Orchestration" panel overlay to display real-time NTC SMS Gateway API progress status (connecting → broadcasting → complete) and automated Strategic NDRRMA/Army Escalation options.
 
 ### 3c. Mobile App Changes
 

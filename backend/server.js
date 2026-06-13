@@ -603,7 +603,10 @@ io.on('connection', (socket) => {
           };
           const alertID = DB.logTrainingIncident(incident);
           console.log(`Drill incident ${idx + 1}/${scenario.incidents.length}: ${alertID}`);
-          io.emit('new_incident', { ...incident, training: true });
+          const evt = { ...incident, alert_id: alertID, training: true };
+          recentIncidents.unshift(evt);
+          if (recentIncidents.length > MAX_CACHED_INCIDENTS) recentIncidents.pop();
+          io.emit('new_incident', evt);
           io.emit('drill_progress', { current: idx + 1, total: scenario.incidents.length });
         }, inc.delayMs);
         drillTimers.push(timer);

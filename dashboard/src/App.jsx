@@ -1077,7 +1077,12 @@ export default function App() {
     return () => clearInterval(interval);
   }, [showDispatchForm, pendingNodeID]);  // Stop siren + clear alert when all incidents are resolved
   useEffect(() => {
-    const hasActive = incidents.some(inc => inc.status !== 'acknowledged' && inc.status !== 'dispatched' && inc.status !== 'escalated');
+    const hasActive = incidents.some(inc => 
+      inc.status !== 'acknowledged' && 
+      inc.status !== 'dispatched' && 
+      inc.status !== 'escalated' && 
+      inc.status !== 'resolved'
+    );
     if (!hasActive && alertActive) {
       setAlertActive(false);
       stopSiren();

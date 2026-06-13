@@ -322,6 +322,11 @@ Dashboard                     Backend                   ESP-B                   
 - ✅ Mobile BT has `discoverUnpairedDevices()` + partial name matching + auto-retry
 - ✅ ESP-A flashed with correct partition scheme (huge_app)
 - ✅ Old APK archives cleaned (only v4 remains)
+- ✅ **Port conflict auto-recovery** — Backend now auto-kills stale processes holding port 3001 on EADDRINUSE via `fuser -k`, with 2s retry delay. Prevents "port already in use" errors when restarting after a crash.
+- ✅ **Node blinking removed** — Sidebar node card status dot and all node map markers are now fully static (no `animate-ping`). Nodes only use heartbeat-based static `getNodeIcon()`, never `sosIcon`/`escalatedIcon`/`ackIcon`.
+- ✅ **SOS label on GPS pins** — Incident location pins now display visible "SOS" text with pulsing ring animation, making phone-triggered GPS coordinates instantly identifiable on the map.
+- ✅ **Backend crash fixed** — Fixed undefined `suffix` variable in `logStartup()` that caused server to crash on restart.
+- ✅ **Cache clear refinement** — Database wipe + backend restart now properly clears both DB and in-memory cache (`recentIncidents`).
 
 ### Non-Issues (Intentional Design)
 - `nodeID` hardcoded as `"NODE_A"` in ESP-A firmware — per-design for prototype hardware

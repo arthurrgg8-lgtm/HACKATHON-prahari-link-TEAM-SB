@@ -24,7 +24,7 @@ const COVERAGE_RADIUS = 850; // Increased for slight overlap between adjacent no
 
 const sosIcon = new L.DivIcon({
   className: 'custom-sos-icon',
-  html: '<div class="sos-marker-ring"><div class="sos-marker-dot"></div></div>',
+  html: '<div style="display:flex;align-items:center;justify-content:center;width:48px;height:48px"><div style="position:absolute;width:48px;height:48px;border-radius:50%;background:rgba(239,68,68,0.25);animation:sos-ring-pulse 1.5s ease-out infinite"></div><div style="width:36px;height:36px;background:#ef4444;border-radius:50%;border:3px solid rgba(255,255,255,0.9);box-shadow:0 0 20px rgba(239,68,68,0.6),0 0 40px rgba(239,68,68,0.3);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;color:white;letter-spacing:1px;z-index:2">SOS</div></div>',
   iconSize: [48, 48], iconAnchor: [24, 24],
 });
 
@@ -39,6 +39,34 @@ const idleIcon = new L.DivIcon({
   html: '<div style="width:18px;height:18px;background:#3b82f6;border-radius:50%;border:3px solid rgba(59,130,246,0.4);box-shadow:0 0 12px rgba(59,130,246,0.3)"></div>',
   iconSize: [18, 18], iconAnchor: [9, 9],
 });
+
+// Heartbeat-aware icons — all same base size (18px like idleIcon) to prevent visual jumping
+const onlineIcon = new L.DivIcon({
+  className: 'custom-online-icon',
+  html: '<div style="width:18px;height:18px;background:#22c55e;border-radius:50%;border:3px solid rgba(34,197,94,0.5);box-shadow:0 0 10px rgba(34,197,94,0.5)"></div>',
+  iconSize: [18, 18], iconAnchor: [9, 9],
+});
+
+const warningIcon = new L.DivIcon({
+  className: 'custom-warning-icon',
+  html: '<div style="width:18px;height:18px;background:#f59e0b;border-radius:50%;border:3px solid rgba(245,158,11,0.5);box-shadow:0 0 10px rgba(245,158,11,0.4)"></div>',
+  iconSize: [18, 18], iconAnchor: [9, 9],
+});
+
+const offlineIcon = new L.DivIcon({
+  className: 'custom-offline-icon',
+  html: '<div style="width:18px;height:18px;background:#4b5563;border-radius:50%;border:2px solid rgba(107,114,128,0.2);opacity:0.4;filter:grayscale(1)"></div>',
+  iconSize: [18, 18], iconAnchor: [9, 9],
+});
+
+// Helper to pick the right node icon based on heartbeat status
+function getNodeIcon(nodeId, nodeStatuses) {
+  const hb = nodeStatuses[nodeId];
+  if (!hb || hb.elapsed === undefined) return idleIcon;
+  if (hb.status === 'online' && hb.elapsed < 30000) return onlineIcon;
+  if (hb.status === 'warning' || (hb.elapsed >= 30000 && hb.elapsed < 60000)) return warningIcon;
+  return offlineIcon;
+}
 
 const escalatedIcon = new L.DivIcon({
   className: 'custom-escalated-icon',
@@ -1230,15 +1258,15 @@ export default function App() {
                     <div key={node.id} className={`p-3 rounded-lg border transition-all duration-300 ${cardClass}`}>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <div className={`w-2.5 h-2.5 rounded-full ${isEscalated ? 'bg-orange-500' : isActive ? 'bg-red-500 animate-ping' : isDispatched ? 'bg-green-500' : 'bg-blue-400'}`} />
+                          <div className={`w-2.5 h-2.5 rounded-full ${isEscalated ? 'bg-orange-500' : isActive ? 'bg-red-500' : isDispatched ? 'bg-green-500' : 'bg-blue-400'}`} />
                           <span className="font-bold text-sm">{node.id}</span>
-                          <div className={`w-1.5 h-1.5 rounded-full ${hbStatus === 'online' ? 'bg-green-500' : 'bg-red-500'}`} />
+                          <div className={`w-1.5 h-1.5 rounded-full ${hbStatus === 'online' ? 'bg-green-500' : 'bg-gray-500'}`} />
                         </div>
                         <div className="text-[10px] text-gray-500">{node.name}</div>
                       </div>
                       <div className="mt-2 flex items-center justify-between">
                         <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-gray-800 text-gray-400 font-mono">
-                          {lastSeenSecs !== null ? `Seen ${lastSeenSecs}s ago` : 'Offline'}
+                          'Node Heartbeat'
                         </span>
                         {(inc?.battery_pct !== undefined || hb?.battery_pct !== undefined) && (
                           <div className="flex items-center gap-1.5">
@@ -1967,10 +1995,7 @@ export default function App() {
             const isEscalated = activeIncident?.status === 'escalated';
             const isDispatched = activeIncident?.status === 'acknowledged' || activeIncident?.status === 'dispatched';
             
-            let icon = idleIcon;
-            if (isEscalated) icon = escalatedIcon;
-            else if (isDispatched) icon = ackIcon;
-            else if (isActive) icon = sosIcon;
+            let icon = getNodeIcon(node.id, nodeStatuses);
             
             return (
               <Marker key={node.id} position={node.coords} icon={icon}>
@@ -1998,10 +2023,7 @@ export default function App() {
             const isEscalated = activeIncident?.status === 'escalated';
             const isDispatched = activeIncident?.status === 'acknowledged' || activeIncident?.status === 'dispatched';
             
-            let icon = idleIcon;
-            if (isEscalated) icon = escalatedIcon;
-            else if (isDispatched) icon = ackIcon;
-            else if (isActive) icon = sosIcon;
+            let icon = getNodeIcon(node.id, nodeStatuses);
             
             return (
               <Marker key={node.id} position={node.coords} icon={icon}>

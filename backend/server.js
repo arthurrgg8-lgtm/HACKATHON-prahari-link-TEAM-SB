@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { SerialPort } = require('serialport');
 const cors = require('cors');
+const { execSync } = require('child_process');
 const DB = require('./database');
 
 const app = express();
@@ -671,9 +672,44 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Prahari-Link Backend running on http://localhost:${PORT}`);
+function logStartup(port) {
+  console.log(`Prahari-Link Backend running on http://localhost:${port}`);
   console.log(`  Alerts DB: ${DB.getAlertCount()} records`);
-  console.log(`  CSV Export: http://localhost:${PORT}/api/alerts/export/csv`);
-  console.log(`  Monthly Report: http://localhost:${PORT}/api/reports/monthly?year=2026&month=6`);
-});
+  console.log(`  CSV Export: http://localhost:${port}/api/alerts/export/csv`);
+  console.log(`  Monthly Report: http://localhost:${port}/api/reports/monthly?year=2026&month=6`);
+}
+
+function startServer(port) {
+  let retriesLeft = 1;
+
+  function tryListen() {
+    server.listen(port, () => logStartup(port));
+  }
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE' && retriesLeft > 0) {
+      retriesLeft--;
+      console.log(`Port ${port} in use — killing stale process (${retriesLeft} retries left)...`);
+      try {
+        execSync(`fuser -k ${port}/tcp 2>/dev/null || true`, { stdio: 'ignore' });
+        setTimeout(() => {
+          server.close();
+          tryListen();
+        }, 2000);
+      } catch (e) {
+        console.error('Failed to kill stale process:', e.message);
+        process.exit(1);
+      }
+    } else if (err.code === 'EADDRINUSE') {
+      console.error(`Port ${port} still in use after retry. Exiting.`);
+      process.exit(1);
+    } else {
+      console.error('Server error:', err);
+      process.exit(1);
+    }
+  });
+
+  tryListen();
+}
+
+startServer(PORT);

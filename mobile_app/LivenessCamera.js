@@ -158,11 +158,7 @@ export default function LivenessCamera({ category, onVerified, onFailed, onCance
         )}
 
         {/* Face guide oval */}
-        <View style={[styles.faceGuide, isVerified && styles.guideOk, isFailed && styles.guideFail]}>
-          <Text style={styles.guideEmoji}>
-            {isVerified ? '✅' : isFailed ? '❌' : '😊'}
-          </Text>
-        </View>
+        <View style={[styles.faceGuide, isVerified && styles.guideOk, isFailed && styles.guideFail]} />
 
         <Text style={[styles.status, isFailed && styles.statusFail]}>{message}</Text>
 
@@ -193,7 +189,7 @@ export default function LivenessCamera({ category, onVerified, onFailed, onCance
 const english = {
   showFace: 'Look at the camera',
   verifying: 'Verifying identity...',
-  verified: '✅ Face Verified! Sending alert...',
+  verified: 'Face Verified! Sending alert...',
   failed: 'No face detected. Access denied.',
   attempt: 'Attempt',
   noCamera: 'No front camera found',
@@ -206,7 +202,7 @@ const english = {
 const nepal = {
   showFace: 'क्यामेरामा अनुहार देखाउनुहोस्',
   verifying: 'अनुहार जाँच्दै...',
-  verified: '✅ प्रमाणित! अलर्ट पठाउँदै...',
+  verified: 'प्रमाणित! अलर्ट पठाउँदै...',
   failed: 'अनुहार पत्ता लागेन। पहुँच अस्वीकृत।',
   attempt: 'प्रयास',
   noCamera: 'अगाडिको क्यामेरा फेला परेन',

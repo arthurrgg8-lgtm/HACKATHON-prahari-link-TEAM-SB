@@ -156,18 +156,29 @@ void OnDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
 }
 
 void OnDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData, int len) {
-    digitalWrite(LED_GREEN, HIGH);
-    
-    // Check if this is a full ACK dispatch struct or legacy single-byte
+    // Check if this is a full ACK/RESOLVE dispatch struct or legacy single-byte
     if (len >= sizeof(struct_ack)) {
         struct_ack ackMsg;
         memcpy(&ackMsg, incomingData, sizeof(ackMsg));
         
+        if (ackMsg.hasDetails == 2) {
+            digitalWrite(LED_GREEN, LOW); // Turn off ACK LED
+            Serial.println("POLICE RESOLVED/CLEARED the incident.");
+            // Send RESOLVED to phone via Bluetooth
+            char resBuffer[40];
+            snprintf(resBuffer, sizeof(resBuffer), "RESOLVED:%s", ackMsg.nodeID);
+            SerialBT.println(resBuffer);
+            Serial.print("Sent to phone: ");
+            Serial.println(resBuffer);
+            return;
+        }
+        
+        digitalWrite(LED_GREEN, HIGH);
         Serial.println("POLICE ACKNOWLEDGED! Dispatch details received.");
         Serial.printf("  Node: %s, Commander: %s, Personnel: %d, Vehicle: %s, ETA: %s\n",
             ackMsg.nodeID, ackMsg.commander, ackMsg.personnel, ackMsg.vehicle, ackMsg.eta);
         
-        if (ackMsg.hasDetails && strlen(ackMsg.commander) > 0) {
+        if (ackMsg.hasDetails == 1 && strlen(ackMsg.commander) > 0) {
             // Rich ACK with dispatch details — send to phone via Bluetooth
             char ackBuffer[220];
             snprintf(ackBuffer, sizeof(ackBuffer),
@@ -187,6 +198,7 @@ void OnDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData,
             Serial.println("Sent to phone: ACK:HELP_ON_THE_WAY");
         }
     } else {
+        digitalWrite(LED_GREEN, HIGH);
         // Legacy single-byte ACK (backward compatible)
         SerialBT.println("ACK:HELP_ON_THE_WAY");
         Serial.println("POLICE ACKNOWLEDGED! Green LED ON.");

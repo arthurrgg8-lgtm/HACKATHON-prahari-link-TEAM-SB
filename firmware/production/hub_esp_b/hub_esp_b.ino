@@ -124,11 +124,29 @@ void parseAndSendACK(String cmd) {
     }
 }
 
+void parseAndSendResolve(String cmd) {
+    struct_ack ackMsg;
+    memset(&ackMsg, 0, sizeof(ackMsg));
+    
+    // Format: "RESOLVED:NODE_A"
+    String rest = cmd.substring(9); // Remove "RESOLVED:"
+    rest.trim();
+    rest.toCharArray(ackMsg.nodeID, 10);
+    ackMsg.hasDetails = 2; // Magic value 2 indicating RESOLVED
+    
+    esp_now_send(relayAddress, (uint8_t *)&ackMsg, sizeof(ackMsg));
+    Serial.print("RESOLVED command relayed to ESP-A: ");
+    Serial.println(ackMsg.nodeID);
+}
+
 void loop() {
     if (Serial.available()) {
         String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
         if (cmd.startsWith("ACK:")) {
             parseAndSendACK(cmd);
+        } else if (cmd.startsWith("RESOLVED:")) {
+            parseAndSendResolve(cmd);
         }
     }
 }

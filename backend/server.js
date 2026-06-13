@@ -501,6 +501,7 @@ io.on('connection', (socket) => {
         ...(trainingMode ? { training: true } : {}),
       };
       updateCachedIncident(nodeID, updatePayload);
+      safeSerialWrite(`RESOLVED:${nodeID}\n`);
       io.emit('incident_updated', updatePayload);
     }
   });

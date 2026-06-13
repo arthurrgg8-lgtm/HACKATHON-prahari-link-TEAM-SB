@@ -536,3 +536,43 @@ cd ~/Desktop/Prahari_Link_Hackathon/dashboard && npm run dev
 ---
 
 *End of Archive — June 11, 2026 — All 30 features complete — Phone BLE Acknowledgment + Incident Card Badges + End-to-End Verification — Backend v5, Dashboard v8, APK v2 with react-native-ble-plx*
+
+## 11. Prahari-Link Mobile APK Upgrade Plan (June 13, 2026)
+
+This phase-by-phase implementation plan outlines the upgrades for the Prahari-Link mobile app to align with the official Nepal Police branding, improve background stability, restrict SOS triggers, implement a waiting lobby, and handle incident resolution.
+
+### Phase-by-Phase Plan
+
+#### Phase 1: Nepal Police Brand Theme & UI Skinning
+- **Primary Color:** Astronaut Blue (`#004163`) for headers, card backgrounds, and core accents.
+- **Accent Color:** Cardinal Red (`#cb2027`) for emergency/warning elements.
+- **Secondary Color:** Half Baked Sky Blue (`#8abcd7`) for borders, input focus, and labels.
+- **Background:** Polish Slate/Dark Navy gradient (from `#011f30` to `#091118`).
+- **Header:** Include a stylized "NEPAL POLICE / नेपाल प्रहरी" banner.
+
+#### Phase 2: Minimalist Face Liveness UI
+- **Camera Screen:** Keep full camera capture and face detection logic intact.
+- **Visuals:** Remove emojis (`😊`, `✅`, `❌`) from the face guide. Keep it simple and clean. The face guide oval border will change colors (White for scanning, Green for verified, Red for failed).
+
+#### Phase 3: Dual-Mode Landing Page & Back Options
+- **Landing Page:** The first view will present two rectangular buttons: "Volunteer Mode" (green) and "Responder Mode" (red).
+- **Navigation:** Implement a back option (header arrow or button) on subsequent pages (Volunteer Feed, Responder SOS Form) to allow return to the main landing page.
+
+#### Phase 4: Compulsory SOS Form Fields
+- **Validation:** Enforce that Name (`citizenName`) and Description (`userNote`) are mandatory.
+- **UI:** Show warning indicators if empty. Disable category items or show alerts if users attempt to trigger SOS with empty fields.
+
+#### Phase 5: Android Foreground Service for Stable Background Connection
+- **Native Implementation:** Create a custom Java Android Foreground Service (`PrahariLinkService`) and Native Module bridge (`PrahariLinkModule`, `PrahariLinkPackage`).
+- **Features:** Persistent sticky notification, CPU WakeLock, foreground service types: `connectedDevice` and `location`.
+- **Integration:** Start service when entering Responder or Volunteer modes; stop when exiting. Register in `AndroidManifest.xml` and `MainApplication.java`.
+
+#### Phase 6: SOS Waiting Lobby & Closed-Loop Acknowledgment
+- **Lobby View:** Once SOS is triggered, move directly to a Waiting Lobby. Display a pulsing status in English and Nepali: "Waiting for acknowledgement... / प्रहरी स्वीकृतिको प्रतीक्षामा...".
+- **Dispatch Overlay:** When `ACK:NODE_ID|...` is received over Bluetooth, transition to the "Help is Coming" screen with dispatch details. Keep this screen persistent until manually dismissed.
+
+#### Phase 7: Persistent Lockout & Dashboard Resolution Handler
+- **Local Persistence:** Save the active incident state in `AsyncStorage`.
+- **Lockout:** Prevent triggering a new alert while an alert is active, unacknowledged, or resolved/removed.
+- **Resolution Communication:** Update backend (`server.js`) to emit `RESOLVED:NODE_ID\n` over serial, and relay via ESP-B and ESP-A to the phone. The phone resets/locks accordingly.
+

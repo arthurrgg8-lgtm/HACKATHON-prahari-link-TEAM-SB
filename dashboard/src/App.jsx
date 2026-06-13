@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline, useMap } from 'react-leaflet';
 import { io } from 'socket.io-client';
-import { Shield, Bell, CheckCircle, Radio, ChevronDown, ChevronRight, MapPin, Wifi, WifiOff, X, AlertTriangle } from 'lucide-react';
+import { Shield, Bell, CheckCircle, Radio, ChevronDown, ChevronRight, MapPin, Wifi, WifiOff, X, AlertTriangle, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import L from 'leaflet';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -205,6 +205,7 @@ const TRANSLATIONS = {
     volunteerPanel: 'Community Volunteer Network',
     volunteerTotal: 'Total Alerted',
     volunteerStatusNotified: '🔔 Notified',
+    volunteerStatusAccepted: '✋ Accepted',
     volunteerStatusResponding: '🚶 Responding',
     volunteerStatusArrived: '📍 Arrived',
     volunteerDistance: 'away',
@@ -317,6 +318,7 @@ const TRANSLATIONS = {
     volunteerPanel: 'सामुदायिक स्वयंसेवक सञ्जाल',
     volunteerTotal: 'जम्मा सूचित',
     volunteerStatusNotified: '🔔 सूचित',
+    volunteerStatusAccepted: '✋ स्वीकृत',
     volunteerStatusResponding: '🚶 प्रतिक्रिया दिँदै',
     volunteerStatusArrived: '📍 आइपुगे',
     volunteerDistance: 'टाढा',
@@ -340,7 +342,14 @@ const TRANSLATIONS = {
   },
 };
 
-const socket = io(`http://${window.location.hostname}:3001`, { reconnection: true, reconnectionDelay: 500 });
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || `${window.location.protocol}//${window.location.hostname}:3001`;
+const OPERATOR_TOKEN = import.meta.env.VITE_OPERATOR_TOKEN || 'prahari-operator-demo-2026';
+const apiUrl = (path) => `${BACKEND_URL}${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(OPERATOR_TOKEN)}`;
+const socket = io(BACKEND_URL, {
+  auth: { token: OPERATOR_TOKEN },
+  reconnection: true,
+  reconnectionDelay: 500,
+});
 
 function MapFlyTo({ center }) {
   const map = useMap();
@@ -889,10 +898,12 @@ export default function App() {
   const [lastIncident, setLastIncident] = useState(null);
   const [alertActive, setAlertActive] = useState(false);
   const [modulesExpanded, setModulesExpanded] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [locationsExpanded, setLocationsExpanded] = useState(true);
   const [language, setLanguage] = useState('en');
   const [showDispatchForm, setShowDispatchForm] = useState(false);
   const [pendingNodeID, setPendingNodeID] = useState(null);
+  const [pendingAlertID, setPendingAlertID] = useState(null);
   const [dispatchInfo, setDispatchInfo] = useState({ equipment: [] });
   const [escalationTimeLeft, setEscalationTimeLeft] = useState(ESCALATION_TIMEOUT);
   const [showNDRRMAForm, setShowNDRRMAForm] = useState(false);
@@ -928,13 +939,27 @@ export default function App() {
   useEffect(() => { incidentsRef.current = incidents; }, [incidents]);
 
   const getCategoryInfo = (inc) => {
-    if (inc.category && CATEGORY_CONFIG[inc.category]) return CATEGORY_CONFIG[inc.category];
-    if (inc.type === 'SOS') return { color: 'bg-red-600/20 text-red-400', label: '\u{1F198} SOS', severity: 'HIGH', sevColor: 'bg-orange-600/30 text-orange-300' };
-    if (inc.type === 'FIRE') return { color: 'bg-orange-600/20 text-orange-400', label: '\u{1F525} FIRE', severity: 'HIGH', sevColor: 'bg-orange-600/30 text-orange-300' };
-    if (inc.type === 'RISK') return { color: 'bg-yellow-600/20 text-yellow-400', label: '\u26A0\uFE0F RISK', severity: 'MEDIUM', sevColor: 'bg-yellow-600/30 text-yellow-300' };
-    if (inc.type === 'INFO') return { color: 'bg-blue-600/20 text-blue-400', label: '\u2139\uFE0F INFO', severity: 'MEDIUM', sevColor: 'bg-yellow-600/30 text-yellow-300' };
-    if (inc.type === 'MISSING') return { color: 'bg-yellow-600/20 text-yellow-400', label: '\u{1F50D} MISSING', severity: 'MEDIUM', sevColor: 'bg-yellow-600/30 text-yellow-300' };
-    return { color: 'bg-gray-600/20 text-gray-400', label: inc.type, severity: '', sevColor: '' };
+    let info;
+    if (inc.category && CATEGORY_CONFIG[inc.category]) {
+      info = { ...CATEGORY_CONFIG[inc.category] };
+    } else if (inc.type === 'SOS') {
+      info = { color: 'bg-red-600/20 text-red-400', label: '\u{1F198} SOS', severity: 'HIGH', sevColor: 'bg-orange-600/30 text-orange-300' };
+    } else if (inc.type === 'FIRE') {
+      info = { color: 'bg-orange-600/20 text-orange-400', label: '\u{1F525} FIRE', severity: 'HIGH', sevColor: 'bg-orange-600/30 text-orange-300' };
+    } else if (inc.type === 'RISK') {
+      info = { color: 'bg-yellow-600/20 text-yellow-400', label: '\u26A0\uFE0F RISK', severity: 'MEDIUM', sevColor: 'bg-yellow-600/30 text-yellow-300' };
+    } else if (inc.type === 'INFO') {
+      info = { color: 'bg-blue-600/20 text-blue-400', label: '\u2139\uFE0F INFO', severity: 'MEDIUM', sevColor: 'bg-yellow-600/30 text-yellow-300' };
+    } else if (inc.type === 'MISSING') {
+      info = { color: 'bg-yellow-600/20 text-yellow-400', label: '\u{1F50D} MISSING', severity: 'MEDIUM', sevColor: 'bg-yellow-600/30 text-yellow-300' };
+    } else {
+      info = { color: 'bg-gray-600/20 text-gray-400', label: inc.type, severity: '', sevColor: '' };
+    }
+
+    if (inc.source === 'simulated') {
+      info.label = `${info.label} (demo)`;
+    }
+    return info;
   };
 
   const processedIncidents = React.useMemo(() => {
@@ -979,58 +1004,60 @@ export default function App() {
       });
 
       // ── Simulate volunteer BLE notifications ──────────────────────────
-      const volunteerNames = [
-        'Rajesh Gurung', 'Anita Thapa', 'Bishnu Rai', 'Sunita Sharma',
-        'Krishna Limbu', 'Maya Tamang', 'Ram KC', 'Gita Baral',
-        'Hari Acharya', 'Sita Poudel', 'Milan Shrestha', 'Laxmi Neupane'
-      ];
-      const volCount = 3 + Math.floor(Math.random() * 3); // 3-5 volunteers
-      const volunteers = [];
-      for (let v = 0; v < volCount; v++) {
-        const name = volunteerNames[Math.floor(Math.random() * volunteerNames.length)];
-        const dist = Math.round(40 + Math.random() * 460); // 40-500m
-        volunteers.push({ name, dist, status: 'notified', id: `${data.nodeID}_vol_${v}_${Date.now()}` });
-      }
-      setVolunteerData(prev => ({
-        ...prev,
-        [data.nodeID]: { incident: data, volunteers, notifiedAt: Date.now() }
-      }));
+      if (data.source === 'simulated' || trainingMode) {
+        const volunteerNames = [
+          'Rajesh Gurung', 'Anita Thapa', 'Bishnu Rai', 'Sunita Sharma',
+          'Krishna Limbu', 'Maya Tamang', 'Ram KC', 'Gita Baral',
+          'Hari Acharya', 'Sita Poudel', 'Milan Shrestha', 'Laxmi Neupane'
+        ];
+        const volCount = 3 + Math.floor(Math.random() * 3); // 3-5 volunteers
+        const volunteers = [];
+        for (let v = 0; v < volCount; v++) {
+          const name = volunteerNames[Math.floor(Math.random() * volunteerNames.length)];
+          const dist = Math.round(40 + Math.random() * 460); // 40-500m
+          volunteers.push({ name, dist, status: 'notified', id: `${data.nodeID}_vol_${v}_${Date.now()}`, source: 'simulated' });
+        }
+        setVolunteerData(prev => ({
+          ...prev,
+          [data.nodeID]: { incident: data, volunteers, notifiedAt: Date.now(), source: 'simulated' }
+        }));
 
-      // Progress volunteer statuses: notified → responding after 5s → arrived after 15s
-      const respTimer = setTimeout(() => {
-        setVolunteerData(prev => {
-          if (!prev[data.nodeID]) return prev;
-          return {
-            ...prev,
-            [data.nodeID]: {
-              ...prev[data.nodeID],
-              volunteers: prev[data.nodeID].volunteers.map(v => ({
-                ...v, status: v.status === 'notified' ? 'responding' : v.status
-              }))
-            }
-          };
-        });
-      }, 5000);
-      const arriveTimer = setTimeout(() => {
-        setVolunteerData(prev => {
-          if (!prev[data.nodeID]) return prev;
-          return {
-            ...prev,
-            [data.nodeID]: {
-              ...prev[data.nodeID],
-              volunteers: prev[data.nodeID].volunteers.map(v => ({
-                ...v, status: v.status === 'responding' ? 'arrived' : v.status
-              }))
-            }
-          };
-        });
-      }, 15000);
-      volunteerTimersRef.current[`resp_${data.nodeID}`] = respTimer;
-      volunteerTimersRef.current[`arr_${data.nodeID}`] = arriveTimer;
+        // Progress volunteer statuses: notified → responding after 5s → arrived after 15s
+        const respTimer = setTimeout(() => {
+          setVolunteerData(prev => {
+            if (!prev[data.nodeID]) return prev;
+            return {
+              ...prev,
+              [data.nodeID]: {
+                ...prev[data.nodeID],
+                volunteers: prev[data.nodeID].volunteers.map(v => ({
+                  ...v, status: v.status === 'notified' ? 'responding' : v.status
+                }))
+              }
+            };
+          });
+        }, 5000);
+        const arriveTimer = setTimeout(() => {
+          setVolunteerData(prev => {
+            if (!prev[data.nodeID]) return prev;
+            return {
+              ...prev,
+              [data.nodeID]: {
+                ...prev[data.nodeID],
+                volunteers: prev[data.nodeID].volunteers.map(v => ({
+                  ...v, status: v.status === 'responding' ? 'arrived' : v.status
+                }))
+              }
+            };
+          });
+        }, 15000);
+        volunteerTimersRef.current[`resp_${data.nodeID}`] = respTimer;
+        volunteerTimersRef.current[`arr_${data.nodeID}`] = arriveTimer;
+      }
 
       // ── Auto-simulate phone BLE acknowledgment (fallback) ───────────
-      // Randomly mark ~50% of incidents as phone-BLE-confirmed after 8-18s
-      if (Math.random() < 0.5) {
+      // Randomly mark ~50% of simulated incidents as phone-BLE-confirmed after 8-18s
+      if (Math.random() < 0.5 && (data.source === 'simulated' || trainingMode)) {
         const bleSimDelay = 8000 + Math.floor(Math.random() * 10000);
         const bleSimTimer = setTimeout(() => {
           const volNames = [
@@ -1042,7 +1069,7 @@ export default function App() {
           const rssi = -45 - Math.floor(Math.random() * 35);
           setBleConfirmedNodes(prev => ({
             ...prev,
-            [data.nodeID]: { volunteerName: scannerName, rssi, confirmedAt: Date.now() }
+            [data.nodeID]: { volunteerName: scannerName, rssi, source: 'simulated', confirmedAt: Date.now() }
           }));
           console.log(`📱 Auto-sim: Phone BLE confirmed ${data.nodeID} (${scannerName}, ${rssi}dBm)`);
         }, bleSimDelay);
@@ -1053,16 +1080,18 @@ export default function App() {
       // If officer doesn't acknowledge+dispatch within 5 min → auto SMS to superior
       const timerKey = `${data.nodeID}__${Date.parse(data.timestamp)}`;
       const timerId = setTimeout(() => {
-        const currentInc = incidentsRef.current.find(
-          inc => inc.nodeID === data.nodeID && inc.status !== 'acknowledged' && inc.status !== 'dispatched'
-        );
+        const currentInc = incidentsRef.current.find(inc => {
+          const isTarget = data.alert_id ? inc.alert_id === data.alert_id : inc.nodeID === data.nodeID;
+          return isTarget && inc.status !== 'acknowledged' && inc.status !== 'dispatched';
+        });
         if (currentInc) {
           setSmsAlertData(currentInc);
           setShowSMSAlert(true);
-          setIncidents(prev => prev.map(inc =>
-            inc.nodeID === data.nodeID ? { ...inc, status: 'escalated' } : inc
-          ));
-          socket.emit('escalate_incident', data.nodeID);
+          setIncidents(prev => prev.map(inc => {
+            const isTarget = data.alert_id ? inc.alert_id === data.alert_id : inc.nodeID === data.nodeID;
+            return isTarget ? { ...inc, status: 'escalated' } : inc;
+          }));
+          socket.emit('escalate_incident', { nodeID: data.nodeID, alert_id: data.alert_id });
         }
         delete escalationTimersRef.current[timerKey];
       }, ESCALATION_TIMEOUT * 1000);
@@ -1094,7 +1123,7 @@ export default function App() {
 
     // Also fetch initial incidents from REST API as a robust fallback
     const abortCtrl = new AbortController();
-    fetch('http://localhost:3001/api/alerts', { signal: abortCtrl.signal })
+    fetch(apiUrl('/api/alerts'), { signal: abortCtrl.signal })
       .then(r => r.json())
       .then(data => {
         if (data.incidents && data.incidents.length > 0) {
@@ -1223,8 +1252,39 @@ export default function App() {
       console.log('📱 Phone BLE confirmed:', data);
       setBleConfirmedNodes(prev => ({
         ...prev,
-        [data.nodeID]: { volunteerName: data.volunteerName || 'Phone', rssi: data.rssi || -60, confirmedAt: Date.parse(data.confirmedAt) || Date.now() }
+        [data.nodeID]: { 
+          volunteerName: data.volunteerName || 'Phone', 
+          rssi: data.rssi || -60, 
+          source: data.source || 'real',
+          confirmedAt: Date.parse(data.confirmedAt) || Date.now() 
+        }
       }));
+
+      // If it's a real acceptance from the app, add to volunteer list as 'accepted'
+      if (data.source === 'real') {
+        setVolunteerData(prev => {
+          const current = prev[data.nodeID] || { incident: { nodeID: data.nodeID }, volunteers: [] };
+          // Prevent duplicates
+          if (current.volunteers.some(v => v.name === data.volunteerName)) return prev;
+          
+          return {
+            ...prev,
+            [data.nodeID]: {
+              ...current,
+              volunteers: [
+                { 
+                  id: `real_vol_${data.volunteerName}_${Date.now()}`, 
+                  name: data.volunteerName, 
+                  status: 'accepted', 
+                  dist: Math.abs(data.rssi) * 2, // Mock distance based on signal
+                  source: 'real' 
+                },
+                ...current.volunteers
+              ]
+            }
+          };
+        });
+      }
     });
 
     return () => {
@@ -1280,14 +1340,16 @@ export default function App() {
   useEffect(() => {
     if (!showDispatchForm || !pendingNodeID) return;
     const interval = setInterval(() => {
-      const inc = incidentsRef.current.find(i => i.nodeID === pendingNodeID);
+      const inc = incidentsRef.current.find(i =>
+        pendingAlertID ? i.alert_id === pendingAlertID : i.nodeID === pendingNodeID
+      );
       if (inc) {
         const elapsed = Math.floor((Date.now() - new Date(inc.timestamp).getTime()) / 1000);
         setEscalationTimeLeft(Math.max(0, ESCALATION_TIMEOUT - elapsed));
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [showDispatchForm, pendingNodeID]);  // Stop siren + clear alert when all incidents are resolved
+  }, [showDispatchForm, pendingNodeID, pendingAlertID]);  // Stop siren + clear alert when all incidents are resolved
   useEffect(() => {
     const hasActive = incidents.some(inc => 
       inc.status !== 'acknowledged' && 
@@ -1300,9 +1362,13 @@ export default function App() {
       stopSiren();
     }
   }, [incidents, alertActive, stopSiren]);
-  const openDispatchForm = (nodeID) => {
+  const openDispatchForm = (incident) => {
+    const nodeID = incident.nodeID;
     setPendingNodeID(nodeID);
-    const inc = incidentsRef.current.find(i => i.nodeID === nodeID);
+    setPendingAlertID(incident.alert_id || null);
+    const inc = incidentsRef.current.find(i =>
+      incident.alert_id ? i.alert_id === incident.alert_id : i.nodeID === nodeID
+    );
     // Store unique timer key so we clear the right timer (not a training vs real collision)
     setPendingTimerKey(inc ? `${nodeID}__${Date.parse(inc.timestamp)}` : null);
     setDispatchInfo({ commander: '', personnel: '', equipment: [], vehicle: '', notes: '' });
@@ -1314,14 +1380,14 @@ export default function App() {
 
   const submitDispatch = () => {
     clearEscalationTimer(pendingTimerKey);
-    const data = { nodeID: pendingNodeID, ...dispatchInfo };
+    const data = { nodeID: pendingNodeID, alert_id: pendingAlertID, ...dispatchInfo };
     socket.emit('acknowledge_incident', data);
     // Optimistic update so UI immediately reflects dispatched status
     setIncidents(prev => {
       let updated = false;
       return prev.map(inc => {
-        if (!updated && inc.nodeID === pendingNodeID &&
-            inc.status !== 'resolved' && inc.status !== 'dispatched') {
+        const isTarget = pendingAlertID ? inc.alert_id === pendingAlertID : inc.nodeID === pendingNodeID;
+        if (!updated && isTarget && inc.status !== 'resolved' && inc.status !== 'dispatched') {
           updated = true;
           return { ...inc, status: 'dispatched', dispatchInfo: dispatchInfo, dispatchedAt: Date.now() };
         }
@@ -1330,6 +1396,7 @@ export default function App() {
     });
     setShowDispatchForm(false);
     setPendingNodeID(null);
+    setPendingAlertID(null);
     setPendingTimerKey(null);
   };
 
@@ -1351,6 +1418,7 @@ export default function App() {
     volunteerTimersRef.current = {};
     setShowDispatchForm(false);
     setPendingNodeID(null);
+    setPendingAlertID(null);
     setPendingTimerKey(null);
     setShowSMSAlert(false);
     setSmsAlertData(null);
@@ -1376,7 +1444,7 @@ export default function App() {
 
 
   return (
-    <div className={`flex h-screen w-screen bg-gray-950 text-white font-sans overflow-hidden ${
+    <div className={`command-dashboard flex h-screen w-screen bg-gray-950 text-white font-sans overflow-hidden ${
       trainingMode ? 'border-4 border-orange-500/60 shadow-[inset_0_0_60px_rgba(251,146,60,0.08)]' : ''
     } ${alertActive ? 'sos-border-flash border-4 border-red-500/60' : ''}`} style={{ fontFamily: language === 'ne' ? "'Noto Sans Devanagari', sans-serif" : '' }}>
       {alertActive && (
@@ -1392,36 +1460,35 @@ export default function App() {
 
       {alertActive && <div className="sos-alert-overlay fixed inset-0" />}
 
-      <div className="w-80 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0">
-        <div className="p-4 border-b border-gray-800 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-600 p-2 rounded-lg"><Shield className="text-white" size={20} /></div>
-            <div>
-              <h1 className="text-lg font-bold tracking-tight">{t.title}</h1>
-              <p className="text-[10px] text-gray-500">{t.subtitle}</p>
+      <div className={`command-sidebar ${sidebarCollapsed ? 'w-[72px]' : 'w-[360px]'} flex flex-col shrink-0 transition-[width] duration-200`}>
+        <div className="agency-masthead">
+          <div className="agency-topline" />
+          <div className="agency-main">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="agency-shield"><Shield size={22} /></div>
+              {!sidebarCollapsed && <div className="min-w-0">
+                <div className="agency-nepali">नेपाल प्रहरी</div>
+                <h1 className="agency-title">NEPAL POLICE</h1>
+                <p className="agency-subtitle">COMMAND &amp; CONTROL OPERATIONS</p>
+              </div>}
             </div>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => {
-                // Optimistic update — toggle immediately, server will confirm
-                setTrainingMode(prev => !prev);
-                socket.emit('toggle_training_mode');
-              }}
-              className={`px-2 py-1 text-[9px] font-bold rounded-lg transition-all ${
-                trainingMode
-                  ? 'bg-orange-600 text-white border border-orange-500/50 shadow-[0_0_8px_rgba(251,146,60,0.4)]'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-              }`}
-              title={trainingMode ? t.trainingOff : t.trainingToggle}
-            >
-              {trainingMode ? t.trainingOn : t.trainingToggle}
+            <button className="sidebar-collapse" onClick={() => setSidebarCollapsed(v => !v)} title="Toggle navigation">
+              {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
             </button>
-            <button onClick={() => setLanguage(prev => prev === 'en' ? 'ne' : 'en')} className="px-2 py-1 text-[10px] bg-gray-800 rounded-lg hover:bg-gray-700">{language === 'en' ? '\u0928\u0947' : 'EN'}</button>
           </div>
+          {!sidebarCollapsed && <>
+            <div className="agency-jurisdiction">PRAHARI-LINK • CENTRAL MONITORING STATION</div>
+            <div className="agency-controls">
+              <button onClick={() => { setTrainingMode(prev => !prev); socket.emit('toggle_training_mode'); }} className={`training-control ${trainingMode ? 'is-training' : ''}`}>
+                {trainingMode ? t.trainingOn : t.trainingToggle}
+              </button>
+              <button onClick={() => setLanguage(prev => prev === 'en' ? 'ne' : 'en')} className="language-control">{language === 'en' ? 'नेपाली' : 'ENGLISH'}</button>
+              <div className="system-state"><span className="state-dot state-active" />ACTIVE</div>
+            </div>
+          </>}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {!sidebarCollapsed && <div className="sidebar-content flex-1 overflow-y-auto p-4 space-y-4">
           <div className="bg-gray-800/40 rounded-xl border border-gray-700/50 overflow-hidden">
             <button onClick={() => setModulesExpanded(!modulesExpanded)} className="w-full flex items-center justify-between p-3 hover:bg-gray-700/30 transition-colors">
               <div className="flex items-center gap-2">
@@ -1483,7 +1550,7 @@ export default function App() {
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{t.activeIncidents}</h2>
             <div className="flex items-center gap-1.5">
               <button
-                onClick={() => window.open('http://localhost:3001/api/alerts/export/csv', '_blank')}
+                onClick={() => window.open(apiUrl('/api/alerts/export/csv'), '_blank')}
                 className="text-[9px] bg-gray-800 hover:bg-gray-700 text-gray-400 px-1.5 py-1 rounded-full transition-colors"
                 title="Export all alerts as CSV"
               >
@@ -1499,7 +1566,7 @@ export default function App() {
                   {trainingMode && (
                 <>
                   <button
-                    onClick={() => window.open('http://localhost:3001/api/training/export/csv', '_blank')}
+                    onClick={() => window.open(apiUrl('/api/training/export/csv'), '_blank')}
                     className="text-[9px] bg-orange-900/40 hover:bg-orange-800/50 text-orange-400 px-1.5 py-1 rounded-full transition-colors"
                     title={t.trainingExport}
                   >
@@ -1678,7 +1745,9 @@ export default function App() {
                     {isPhoneConfirmed && bleInfo && (
                       <div className="flex items-center gap-1.5 mb-1.5 px-1 py-1 bg-emerald-950/40 border border-emerald-800/30 rounded-md">
                         <span className="text-[9px]">{'\u{1F4F1}'}</span>
-                        <span className="text-[8px] text-emerald-300 font-semibold">{bleInfo.volunteerName}</span>
+                        <span className="text-[8px] text-emerald-300 font-semibold">
+                          {bleInfo.volunteerName}{bleInfo.source === 'simulated' ? ' (demo)' : ''}
+                        </span>
                         <span className="text-[7px] text-emerald-600">{t.phoneScannedBy}</span>
                         <span className="text-[7px] text-emerald-500 font-mono">{t.phoneRSSI}: {bleInfo.rssi}dBm</span>
                       </div>
@@ -1688,15 +1757,19 @@ export default function App() {
                     <div className="space-y-1">
                       {vd.volunteers.map(vol => {
                         const statusLabel = vol.status === 'notified' ? t.volunteerStatusNotified :
+                          vol.status === 'accepted' ? t.volunteerStatusAccepted :
                           vol.status === 'responding' ? t.volunteerStatusResponding :
                           t.volunteerStatusArrived;
                         const statusColor = vol.status === 'notified' ? 'text-yellow-400' :
+                          vol.status === 'accepted' ? 'text-emerald-400' :
                           vol.status === 'responding' ? 'text-blue-400' : 'text-green-400';
                         return (
                           <div key={vol.id} className="flex items-center justify-between py-0.5">
                             <div className="flex items-center gap-1.5 min-w-0">
                               <div className={`w-1 h-1 rounded-full ${statusColor}`} />
-                              <span className="text-[9px] text-gray-200 truncate max-w-[80px]">{vol.name}</span>
+                              <span className="text-[9px] text-gray-200 truncate max-w-[80px]">
+                                {vol.name}{vol.source === 'simulated' ? ' (demo)' : ''}
+                              </span>
                               <span className="text-[7px] text-gray-500">{vol.dist}m {t.volunteerDistance}</span>
                             </div>
                             <span className={`text-[8px] font-medium ${statusColor} transition-all duration-500`}>
@@ -1871,11 +1944,6 @@ export default function App() {
                       {'\u{1F9EA}'} {t.trainingLabel}
                     </span>
                   )}
-                  {inc.source === 'simulated' && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-600/30 text-gray-400 font-bold">
-                      {'🧪'} {t.simulatedBadge}
-                    </span>
-                  )}
                   {isEscalated && (
                     <>
                       <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-orange-600/30 text-orange-300 font-bold animate-pulse">{'\u26A0\uFE0F'} ESCALATED</span>
@@ -2043,14 +2111,14 @@ export default function App() {
                       <AlertTriangle size={14} className="text-orange-400" />
                       <span className="text-xs text-orange-400 font-bold">{t.escalated}</span>
                     </div>
-                    <button onClick={() => openDispatchForm(inc.nodeID)} className="mt-2 w-full py-2 bg-orange-600 hover:bg-orange-500 active:bg-orange-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2">
+                    <button onClick={() => openDispatchForm(inc)} className="mt-2 w-full py-2 bg-orange-600 hover:bg-orange-500 active:bg-orange-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2">
                       <AlertTriangle size={14} /> {t.dispatchNow}
                     </button>
                   </div>
                 )}
 
                 {(inc.status !== 'acknowledged' && inc.status !== 'dispatched' && !isEscalated) && (
-                  <button onClick={() => openDispatchForm(inc.nodeID)} className="mt-3 w-full py-2 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2">
+                  <button onClick={() => openDispatchForm(inc)} className="mt-3 w-full py-2 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2">
                     <CheckCircle size={14} /> {t.acknowledge}
                   </button>
                 )}
@@ -2059,7 +2127,7 @@ export default function App() {
           })}
           {/* ┬¿─ Archives — Resolved Incidents ┬¿─ */}
           {processedIncidents.archived.length > 0 && (
-            <div className="bg-gray-800/30 border border-gray-700/40 rounded-xl overflow-hidden">
+            <div className="official-records bg-gray-800/30 border border-gray-700/40 rounded-xl overflow-hidden">
               <div className="px-3 py-2 bg-gray-800/50 border-b border-gray-700/30 flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs">{'\u{1F4C1}'}</span>
@@ -2110,10 +2178,10 @@ export default function App() {
               </div>
             </div>
           )}
-        </div>
+        </div>}
       </div>
 
-      <div className="flex-1 relative">
+      <div className="command-map flex-1 relative">
         {showDispatchForm && (
           <div className="absolute inset-0 z-[2000] bg-black/60 backdrop-blur-sm flex items-center justify-center">
             <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md mx-4 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
@@ -2184,7 +2252,7 @@ export default function App() {
           </div>
         )}
 
-        <MapContainer center={STATIC_NODES[0].coords} zoom={14} className="h-full w-full" zoomControl={false}>
+        <MapContainer center={STATIC_NODES[0].coords} zoom={14} className="h-full w-full official-map" zoomControl={false}>
           <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png" attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' />
           {STATIC_NODES.map(node => {
             const isActive = activeNodeIDs.has(node.id);
@@ -2658,7 +2726,7 @@ export default function App() {
               <button
                 className="flex-1 py-2.5 bg-orange-600 hover:bg-orange-500 text-white text-sm font-bold rounded-lg"
                 onClick={() => {
-                  window.open('http://localhost:3001/api/training/export/csv', '_blank');
+                  window.open(apiUrl('/api/training/export/csv'), '_blank');
                   setSessionSummary(null);
                 }}
               >

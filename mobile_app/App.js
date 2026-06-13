@@ -1,13 +1,35 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, TextInput, Alert, SafeAreaView, PermissionsAndroid, Platform, ScrollView, NativeModules, AppState, InteractionManager, Image } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, TextInput, Alert, SafeAreaView, PermissionsAndroid, Platform, ScrollView, NativeModules, AppState, InteractionManager, Image, Vibration, Linking } from 'react-native';
 import BluetoothSerial from 'react-native-bluetooth-serial-next';
 import * as Location from 'expo-location';
 import * as Battery from 'expo-battery';
 import LivenessCamera from './LivenessCamera';
 import { BleManager } from 'react-native-ble-plx';
+import { io } from 'socket.io-client';
+
+const decodeBase64 = (input) => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+  let str = String(input).replace(/=+$/, '');
+  let output = '';
+  for (let i = 0, bc = 0, bs; i < str.length; i++) {
+    const char = str.charAt(i);
+    const idx = chars.indexOf(char);
+    if (idx === -1) continue;
+    bs = bc % 4 ? bs * 64 + idx : idx;
+    if (bc++ % 4) {
+      output += String.fromCharCode(255 & bs >> (-2 * bc & 6));
+    }
+  }
+  return output;
+};
 
 const bleManager = new BleManager();
 const { PrahariLinkModule } = NativeModules;
+
+// ── Backend Server URL ──────────────────────────────────────────────────────
+// Change this to your laptop's IP when testing on physical devices
+// e.g. 'http://192.168.1.100:3001'
+const BACKEND_URL = 'http://192.168.80.159:3001';
 
 const hexToRgba = (hex, alpha) => {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -55,6 +77,8 @@ const TRANSLATIONS = {
     volunteerTapView: 'Tap to view details',
     volunteerNode: 'Node', volunteerCategory: 'Category',
     volunteerCoords: 'GPS', volunteerTime: 'Detected',
+    volunteerAccept: '✋ ACCEPT & RESPOND',
+    volunteerAccepted: '✅ YOU ARE RESPONDING',
     // Lobby, lock, and validation
     lobbyWaiting: 'ALERT TRANSMITTED',
     lobbySub: 'Waiting for police acknowledgment...',
@@ -93,6 +117,8 @@ const TRANSLATIONS = {
     volunteerTapView: 'विवरण हेर्न ट्याप गर्नुहोस्',
     volunteerNode: 'नोड', volunteerCategory: 'श्रेणी',
     volunteerCoords: 'जीपीएस', volunteerTime: 'पत्ता लागेको',
+    volunteerAccept: '✋ स्वीकार गर्नुहोस्',
+    volunteerAccepted: '✅ तपाईं जाँदै हुनुहुन्छ',
     // Lobby, lock, and validation
     lobbyWaiting: 'अलर्ट पठाइयो',
     lobbySub: 'प्रहरी स्वीकृतिको प्रतीक्षामा...',
@@ -148,15 +174,85 @@ export default function App() {
   // Volunteer state
   const [isVolunteer, setIsVolunteer] = useState(null); // null = landing page, true/false
   const [volunteerAlerts, setVolunteerAlerts] = useState([]);
+  const isVolunteerRef = useRef(null); // Ref mirror to avoid stale closures in socket callbacks
   const [selectedAlertIndex, setSelectedAlertIndex] = useState(null);
+  const [acceptedAlerts, setAcceptedAlerts] = useState(new Set());
   
   // Custom states for waiting lobby, resolutions, and lockout
   const [sosStatus, setSosStatus] = useState('idle'); // idle | waiting | acknowledged | resolved
   const [isLocked, setIsLocked] = useState(false);
   const [developerTapCount, setDeveloperTapCount] = useState(0);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
-  
-  // 15-minute cooldown state
+  const socketRef = useRef(null);
+
+  // Initialize socket inside useEffect
+  useEffect(() => {
+    if (!socketRef.current) {
+      socketRef.current = io(BACKEND_URL, {
+        auth: { token: 'prahari-ingest-demo-2026' },
+        autoConnect: true,
+        transports: ['websocket'],
+      });
+
+      socketRef.current.on('connect', () => console.log('Connected to Prahari Server'));
+      socketRef.current.on('connect_error', (err) => console.log('Socket Error:', err.message));
+
+      // ── Volunteer Socket.IO Fallback ─────────────────────────────────────
+      // Listen for new incidents from the backend so volunteer phones can
+      // receive SOS events even without ESP-A BLE hardware nearby.
+      socketRef.current.on('new_incident', (data) => {
+        if (isVolunteerRef.current !== true) return; // Only process in volunteer mode
+
+        const catLookup = {
+          'LANDSLIDE': { emoji: '🏔️', color: '#dc2626' },
+          'FLOOD':     { emoji: '🌊', color: '#2563eb' },
+          'EARTHQUAKE':{ emoji: '🏚️', color: '#dc2626' },
+          'CRIME':     { emoji: '🔫', color: '#ea580c' },
+          'MEDICAL':   { emoji: '🚑', color: '#dc2626' },
+          'FIRE':      { emoji: '🔥', color: '#ea580c' },
+          'MISSING':   { emoji: '🔍', color: '#ca8a04' },
+          'DISTURBANCE':{ emoji: '📢', color: '#ca8a04' },
+        };
+        const cat = data.alert_category || data.category || 'UNKNOWN';
+        const catInfo = catLookup[cat] || { emoji: '🚨', color: '#ef4444' };
+        const alertKey = `socket-${data.alert_id || Date.now()}`;
+
+        setVolunteerAlerts(prev => {
+          if (prev.some(a => a.key === alertKey)) return prev;
+
+          // Buzz/Vibrate for volunteer — same pattern as BLE detection
+          Vibration.vibrate([0, 500, 200, 500]);
+
+          const coords = data.coords || [];
+          const lat = coords[0] || data.lat || 0;
+          const lon = coords[1] || data.lon || 0;
+
+          return [{
+            key: alertKey,
+            nodeID: data.nodeID || data.node_id || 'UNKNOWN',
+            category: cat,
+            emoji: catInfo.emoji,
+            color: catInfo.color,
+            coords: (lat && lon) ? `${lat},${lon}` : 'N/A',
+            timestamp: new Date().toLocaleTimeString(),
+            rssi: -50, // Simulated — received via network, not BLE
+            source: 'socket',
+            citizenName: data.citizenName || '',
+            note: data.note || '',
+          }, ...prev].slice(0, 10);
+        });
+      });
+    }
+
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+    };
+  }, []);
+
+  // 15-min Cooldown Timer
   const [cooldownUntil, setCooldownUntil] = useState(null);
   const [cooldownRemaining, setCooldownRemaining] = useState(null);
   const cooldownTimerRef = useRef(null);
@@ -207,11 +303,26 @@ export default function App() {
   const handleBackToLanding = () => {
     if (Platform.OS === 'android' && PrahariLinkModule) {
       PrahariLinkModule.stopService().then(console.log).catch(console.warn);
+      PrahariLinkModule.setAlertStatus('idle');
     }
     setIsVolunteer(null);
     setFaceVerified(false);
     setConnected(false);
     setBtStatus('searching');
+    setSosStatus('idle');
+    setIsLocked(false);
+    setAckReceived(false);
+  };
+
+  const handleBackToForm = () => {
+    console.log('Forcing back to form...');
+    setSosStatus('idle');
+    setIsLocked(false);
+    setAckReceived(false);
+    setAckDispatchInfo(null);
+    if (Platform.OS === 'android' && PrahariLinkModule) {
+      PrahariLinkModule.setAlertStatus('idle').catch(e => console.warn('Native status reset failed:', e));
+    }
   };
 
   const enterVolunteerMode = () => {
@@ -227,7 +338,7 @@ export default function App() {
       PrahariLinkModule.startService().then(console.log).catch(console.warn);
       PrahariLinkModule.getAlertStatus().then(status => {
         if (status && status !== 'idle') {
-          // Skip face liveness if there is already an active/resolved incident
+          // For demo, we still allow going back to the form
           setFaceVerified(true);
         } else {
           setFaceVerified(false);
@@ -451,14 +562,18 @@ export default function App() {
           }
           if (scannedDevice) {
             const mfgData = scannedDevice.manufacturerData || '';
-            let rawMfgData = mfgData;
-            try { rawMfgData = atob(mfgData); } catch (e) { }
+            let rawMfgData = '';
+            try { rawMfgData = decodeBase64(mfgData); } catch (e) { console.log('Base64 decode error:', e); }
             if (rawMfgData.includes('P|')) {
               const parts = rawMfgData.split('|');
               if (parts.length >= 4) {
                 const alertKey = `${scannedDevice.id}-${parts[2]}`;
                 setVolunteerAlerts(prev => {
                   if (prev.some(a => a.key === alertKey)) return prev;
+                  
+                  // Buzz/Vibrate for volunteer
+                  Vibration.vibrate([0, 500, 200, 500]);
+                  
                   const nodeMap = { 'A': 'NODE_A', 'B': 'NODE_B', 'C': 'NODE_C', 'L': 'CMD_CTRL' };
                   const catMap = {
                     'LS': 'LANDSLIDE', 'FL': 'FLOOD', 'EQ': 'EARTHQUAKE',
@@ -589,6 +704,11 @@ export default function App() {
     };
   }, []); 
 
+  // Sync isVolunteerRef for use in socket callbacks (avoids stale closures)
+  useEffect(() => {
+    isVolunteerRef.current = isVolunteer;
+  }, [isVolunteer]);
+
   // Start BLE scanning when user registers as volunteer
   useEffect(() => {
     if (isVolunteer === true) {
@@ -648,10 +768,7 @@ export default function App() {
       Alert.alert('Error', 'Not connected to Village Relay Node!');
       return;
     }
-    if (isLocked) {
-      Alert.alert('Lockout Active', t.lockedDesc);
-      return;
-    }
+    // Lockout disabled for demo
     if (citizenName.trim() === '' || userNote.trim() === '') {
       setShowValidationErrors(true);
       Alert.alert(t.requiredFields, t.requiredDesc);
@@ -663,8 +780,9 @@ export default function App() {
   };
 
   const fireSOS = async (category, confidence = 50) => {
-    if (!connected) {
-      Alert.alert('Error', 'Not connected to Village Relay Node!');
+    const isSocketConnected = socketRef.current && socketRef.current.connected;
+    if (!connected && !isSocketConnected) {
+      Alert.alert('Error', 'Not connected to Village Relay Node or Backend Server!');
       return;
     }
     const lat = location?.coords?.latitude || 27.7172;
@@ -681,25 +799,66 @@ export default function App() {
     } catch (e) { }
     
     const payload = `${type}|${lat}|${lon}|${category.id}|${safeNote}|FACE|${confidence}|${safeName}|${batteryPct}\n`;
-    try {
-      await BluetoothSerial.write(payload);
-      
-      // Update app status to waiting in SharedPreferences and React state
-      setSosStatus('waiting');
-      setIsLocked(true);
-      
-      // Start 15-minute cooldown ban
-      const cooldownTime = Date.now() + 15 * 60 * 1000;
-      setCooldownUntil(cooldownTime);
-      setCooldownRemaining(15 * 60);
-      startCooldownTimer(cooldownTime);
-      if (Platform.OS === 'android' && PrahariLinkModule) {
-        PrahariLinkModule.setAlertStatus('waiting');
-        PrahariLinkModule.setCooldown(cooldownTime);
+    
+    // 1. Send via Bluetooth Serial if connected to ESP32 node
+    if (connected) {
+      try {
+        await BluetoothSerial.write(payload);
+      } catch (e) {
+        console.warn('Failed to write to Bluetooth Serial:', e.message);
       }
-    } catch (e) {
-      Alert.alert('Fail', 'Communication error with Node.');
     }
+    
+    // 2. Hybrid/Fallback: Send via Socket.io directly to Backend if connected to Wi-Fi/Internet
+    if (isSocketConnected) {
+      try {
+        const socketPayload = {
+          nodeID: 'CITIZEN_PHONE',
+          type,
+          category: category.id,
+          citizenName: safeName,
+          note: safeNote,
+          ai_detected: 'FACE',
+          ai_confidence: confidence,
+          battery_pct: batteryPct,
+          solar_ok: 1,
+          coords: [lat, lon],
+          timestamp: new Date().toISOString(),
+          source: 'real',
+          status: 'active'
+        };
+        socketRef.current.emit('new_incident', socketPayload);
+      } catch (e) {
+        console.warn('Failed to emit SOS via Socket:', e.message);
+      }
+    }
+
+    // Update app status to waiting for visual feedback
+    setSosStatus('waiting');
+    
+    // Cooldown/Lockout disabled for demo
+    if (Platform.OS === 'android' && PrahariLinkModule) {
+      PrahariLinkModule.setAlertStatus('waiting');
+    }
+  };
+
+  const acceptIncident = (alert) => {
+    if (acceptedAlerts.has(alert.key)) return;
+    
+    const volunteerName = citizenName || 'Citizen Volunteer';
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('phone_ble_ack', {
+        nodeID: alert.nodeID,
+        volunteerName: volunteerName,
+        rssi: alert.rssi,
+        source: 'real',
+      });
+    } else {
+      console.warn('Socket not connected, cannot accept incident');
+    }
+    
+    setAcceptedAlerts(prev => new Set([...prev, alert.key]));
+    Alert.alert('✅ Accepted', 'You are now responding to this incident. Stay safe!');
   };
 
   // ── Prahari-Link Premium Landing Page ──────────────────────────────────────
@@ -768,6 +927,9 @@ export default function App() {
             <Text style={styles.volunteerFooterText}>
               {lang === 'en' ? 'Prahari-Link App v6.0' : 'प्रहरी-लिंक एप संस्करण ६.०'}
             </Text>
+            <TouchableOpacity onPress={handleBackToLanding} style={{ marginTop: 10 }}>
+              <Text style={{ color: '#cb2027', fontSize: 10, fontWeight: 'bold' }}>[ HARD RESET APP ]</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -900,20 +1062,66 @@ export default function App() {
                       <Text style={styles.volunteerExpandText}>
                         {lang === 'en' ? TRANSLATIONS.en.volunteerTapView : TRANSLATIONS.ne.volunteerTapView}
                       </Text>
-                      <TouchableOpacity
-                        style={[styles.volunteerActionBtn, { backgroundColor: '#10b981' }]}
-                        onPress={() => {
-                          Alert.alert(
-                            `🚨 ${alert.category}`,
-                            `${lang === 'en' ? TRANSLATIONS.en.volunteerNode : TRANSLATIONS.ne.volunteerNode}: ${alert.nodeID}\n${lang === 'en' ? TRANSLATIONS.en.volunteerCategory : TRANSLATIONS.ne.volunteerCategory}: ${alert.category}\n📍 ${alert.coords}\n⏱ ${alert.timestamp}\n\nStay safe! Police have been notified.`,
-                            [{ text: t.ok }]
-                          );
-                        }}
-                      >
-                        <Text style={styles.volunteerActionText}>
-                          {lang === 'en' ? 'View Full Details' : 'पूरा विवरण हेर्नुहोस्'}
-                        </Text>
-                      </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
+                        <TouchableOpacity
+                          style={[styles.volunteerActionBtn, { backgroundColor: '#1e40af', flex: 1 }]}
+                          onPress={() => {
+                            Alert.alert(
+                              `🚨 ${alert.category}`,
+                              `${lang === 'en' ? TRANSLATIONS.en.volunteerNode : TRANSLATIONS.ne.volunteerNode}: ${alert.nodeID}\n${lang === 'en' ? TRANSLATIONS.en.volunteerCategory : TRANSLATIONS.ne.volunteerCategory}: ${alert.category}\n📍 ${alert.coords}\n⏱ ${alert.timestamp}\n\nStay safe! Police have been notified.`,
+                              [{ text: t.ok }]
+                            );
+                          }}
+                        >
+                          <Text style={styles.volunteerActionText}>
+                            {lang === 'en' ? 'Details' : 'विवरण'}
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.volunteerActionBtn, { 
+                            backgroundColor: acceptedAlerts.has(alert.key) ? '#047857' : '#10b981', 
+                            flex: 1.5 
+                          }]}
+                          onPress={() => acceptIncident(alert)}
+                          disabled={acceptedAlerts.has(alert.key)}
+                        >
+                          <Text style={styles.volunteerActionText}>
+                            {acceptedAlerts.has(alert.key) ? t.volunteerAccepted : t.volunteerAccept}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Google Maps Navigation Button */}
+                      {alert.coords && alert.coords !== 'N/A' && (
+                        <TouchableOpacity
+                          style={{
+                            backgroundColor: '#1e3a5f',
+                            padding: 12,
+                            borderRadius: 10,
+                            marginTop: 8,
+                            alignItems: 'center',
+                            flexDirection: 'row',
+                            justifyContent: 'center',
+                            borderWidth: 1,
+                            borderColor: '#2563eb',
+                          }}
+                          onPress={() => {
+                            const [lat, lon] = alert.coords.split(',');
+                            const myLat = location?.coords?.latitude || '';
+                            const myLon = location?.coords?.longitude || '';
+                            const url = myLat
+                              ? `https://www.google.com/maps/dir/?api=1&origin=${myLat},${myLon}&destination=${lat},${lon}&travelmode=walking`
+                              : `https://www.google.com/maps?q=${lat},${lon}`;
+                            Linking.openURL(url).catch(err => console.log('Map open error:', err));
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={{ color: '#93c5fd', fontWeight: '800', fontSize: 13 }}>
+                            🗺️ {lang === 'en' ? 'NAVIGATE TO INCIDENT' : 'घटनास्थलमा जानुहोस्'}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   )}
                 </TouchableOpacity>
@@ -935,14 +1143,14 @@ export default function App() {
       <SafeAreaView style={[styles.container, { backgroundColor: '#011f30' }]}>
         <View style={styles.header}>
           <View style={styles.headerRow}>
-            <TouchableOpacity onPress={handleBackToLanding} style={styles.backButton}>
+            <TouchableOpacity onPress={handleBackToForm} style={styles.backButton}>
               <Text style={{ color: '#8abcd7', fontSize: 22, fontWeight: '900' }}>←</Text>
             </TouchableOpacity>
             <PoliceBrand lang={lang} title={t.title} compact />
             <View style={styles.headerRight}>
-              <View style={[styles.statusBadge, { backgroundColor: '#eab308' }]}>
-                <Text style={styles.statusBadgeText}>WAITING</Text>
-              </View>
+              <TouchableOpacity onPress={handleBackToForm} style={[styles.statusBadge, { backgroundColor: '#eab308' }]}>
+                <Text style={styles.statusBadgeText}>RESET</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -963,6 +1171,12 @@ export default function App() {
             </View>
             <Text style={styles.lobbyInfoNote}>{userNote || 'SOS Emergency Alert'}</Text>
           </View>
+
+          <TouchableOpacity style={[styles.ackHomeButton, { backgroundColor: '#eab308' }]} onPress={handleBackToForm}>
+            <Text style={[styles.ackHomeButtonText, { color: '#011f30' }]}>
+              {lang === 'en' ? '⚠️ NEW EMERGENCY (RESET)' : '⚠️ नयाँ आपतकाल (रिसेट)'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <TouchableOpacity onPress={handleDeveloperReset} style={styles.footer}>
@@ -978,17 +1192,14 @@ export default function App() {
       <SafeAreaView style={[styles.container, { backgroundColor: '#011f30' }]}>
         <View style={styles.header}>
           <View style={styles.headerRow}>
-            <TouchableOpacity onPress={handleBackToLanding} style={styles.backButton}>
+            <TouchableOpacity onPress={handleBackToForm} style={styles.backButton}>
               <Text style={{ color: '#8abcd7', fontSize: 22, fontWeight: '900' }}>←</Text>
             </TouchableOpacity>
             <PoliceBrand lang={lang} title={t.title} compact />
             <View style={styles.headerRight}>
-              <TouchableOpacity onPress={() => setLang(lang === 'en' ? 'ne' : 'en')} style={styles.langToggle}>
-                <Text style={styles.langText}>{lang === 'en' ? 'ने' : 'EN'}</Text>
+              <TouchableOpacity onPress={handleBackToForm} style={[styles.statusBadge, { backgroundColor: '#10b981' }]}>
+                <Text style={styles.statusBadgeText}>RESET</Text>
               </TouchableOpacity>
-              <View style={[styles.statusBadge, { backgroundColor: '#10b981' }]}>
-                <Text style={styles.statusBadgeText}>ACTIVE ACK</Text>
-              </View>
             </View>
           </View>
         </View>
@@ -1035,9 +1246,9 @@ export default function App() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.ackHomeButton} onPress={handleBackToLanding}>
+          <TouchableOpacity style={[styles.ackHomeButton, { backgroundColor: '#10b981' }]} onPress={handleBackToForm}>
             <Text style={styles.ackHomeButtonText}>
-              {lang === 'en' ? 'Back to Home' : 'गृह पृष्ठमा जानुहोस्'}
+              {lang === 'en' ? '🚨 SEND ANOTHER SOS' : '🚨 अर्को एसओएस पठाउनुहोस्'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1055,14 +1266,14 @@ export default function App() {
       <SafeAreaView style={[styles.container, { backgroundColor: '#011f30' }]}>
         <View style={styles.header}>
           <View style={styles.headerRow}>
-            <TouchableOpacity onPress={handleBackToLanding} style={styles.backButton}>
+            <TouchableOpacity onPress={handleBackToForm} style={styles.backButton}>
               <Text style={{ color: '#8abcd7', fontSize: 22, fontWeight: '900' }}>←</Text>
             </TouchableOpacity>
             <PoliceBrand lang={lang} title={t.title} compact />
             <View style={styles.headerRight}>
-              <View style={[styles.statusBadge, { backgroundColor: '#10b981' }]}>
-                <Text style={styles.statusBadgeText}>RESOLVED</Text>
-              </View>
+              <TouchableOpacity onPress={handleBackToForm} style={[styles.statusBadge, { backgroundColor: '#10b981' }]}>
+                <Text style={styles.statusBadgeText}>RESET</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -1072,9 +1283,9 @@ export default function App() {
           <Text style={styles.resolvedTitle}>{t.resolvedTitle}</Text>
           <Text style={styles.resolvedSubtitle}>{t.resolvedSub}</Text>
           
-          <TouchableOpacity style={styles.resolvedHomeBtn} onPress={handleBackToLanding}>
+          <TouchableOpacity style={[styles.resolvedHomeBtn, { backgroundColor: '#10b981' }]} onPress={handleBackToForm}>
             <Text style={styles.resolvedHomeBtnText}>
-              {lang === 'en' ? 'Back to Landing' : 'ल्यान्डिङ पृष्ठमा जानुहोस्'}
+              {lang === 'en' ? 'NEW SOS' : 'नयाँ एसओएस'}
             </Text>
           </TouchableOpacity>
         </View>

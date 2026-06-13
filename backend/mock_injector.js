@@ -1,6 +1,8 @@
 const { io } = require('socket.io-client');
 
-const socket = io('http://localhost:3001');
+const socket = io(process.env.BACKEND_URL || 'http://localhost:3001', {
+  auth: { token: process.env.INGEST_TOKEN || 'prahari-ingest-demo-2026' },
+});
 
 const mockIncidents = [
   { nodeID: "NODE_A", type: "SOS", category: "LANDSLIDE", citizenName: "Ram Sharma", note: "Landslide blocking main road! 2 vehicles trapped.", ai_detected: "FACE", ai_confidence: 95, battery_pct: 87, solar_ok: 1, coords: [27.694532479739998, 83.4456506797053] },
@@ -45,6 +47,7 @@ setInterval(() => {
         nodeID: incident.nodeID,
         volunteerName: volName,
         rssi,
+        source: 'simulated',
       });
     }, delay);
   }

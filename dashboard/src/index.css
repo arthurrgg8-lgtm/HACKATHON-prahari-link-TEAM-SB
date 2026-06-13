@@ -213,3 +213,43 @@
     stroke-width: 1px;
   }
 }
+
+
+/* Nepal Police Command and Control design system */
+:root { --police-blue:#002a5c; --police-blue-2:#003b73; --gov-gold:#d4af37; --flash-red:#ef233c; --panel:#07182b; --line:#29435f; }
+.command-dashboard { background:#03101f; color:#eef4fa; font-family:Inter,"Noto Sans Devanagari",system-ui,sans-serif; }
+.command-sidebar { background:linear-gradient(180deg,#061a30 0%,#041321 100%); border-right:1px solid #31506d; box-shadow:8px 0 30px rgba(0,0,0,.28); z-index:1100; }
+.agency-masthead { background:#002a5c; border-bottom:1px solid rgba(212,175,55,.55); box-shadow:0 4px 16px rgba(0,0,0,.3); }
+.agency-topline { height:5px; background:#d4af37; }
+.agency-main { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:16px 14px 11px; }
+.agency-shield { width:42px; height:48px; flex:none; display:flex; align-items:center; justify-content:center; color:#fff; background:#003b73; border:1px solid #d4af37; border-radius:4px 4px 12px 12px; box-shadow:inset 0 0 0 2px rgba(255,255,255,.08); }
+.agency-nepali { color:#fff; font-family:"Noto Sans Devanagari",sans-serif; font-size:18px; font-weight:800; line-height:1.15; }
+.agency-title { color:#fff; font-size:13px; font-weight:900; letter-spacing:.18em; margin-top:3px; }
+.agency-subtitle { color:#afc8df; font-size:8px; font-weight:700; letter-spacing:.12em; margin-top:3px; }
+.agency-jurisdiction { margin:0 14px; padding:7px 9px; color:#d4af37; border:1px solid rgba(212,175,55,.38); background:rgba(0,0,0,.14); font:700 8px/1.2 ui-monospace,monospace; letter-spacing:.09em; }
+.agency-controls { display:flex; align-items:center; gap:6px; padding:10px 14px 13px; }
+.sidebar-collapse,.language-control,.training-control { border:1px solid #496681; background:#092442; color:#d7e4ef; border-radius:4px; font-size:9px; font-weight:800; padding:6px 8px; }
+.sidebar-collapse { padding:7px; color:#d4af37; }
+.training-control.is-training { background:#8a4b00; border-color:#d4af37; color:#fff; }
+.system-state { margin-left:auto; display:flex; align-items:center; gap:6px; color:#a9c5dc; font:800 8px ui-monospace,monospace; letter-spacing:.08em; }
+.state-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#667788; }
+.state-active { background:#22c55e; box-shadow:0 0 0 2px rgba(34,197,94,.15); }
+.sidebar-content > div,.sidebar-content > section { border-radius:6px !important; box-shadow:0 4px 12px rgba(0,0,0,.16); }
+.command-sidebar button { letter-spacing:.02em; }
+.command-sidebar .bg-blue-600,.command-sidebar .bg-blue-700 { background-color:#003b73 !important; }
+.command-sidebar .text-blue-400,.command-sidebar .text-blue-300 { color:#a9c5dc !important; }
+.command-map { border-left:1px solid rgba(212,175,55,.22); }
+.official-map { filter:saturate(.72) contrast(1.1) brightness(.92); }
+.leaflet-container { background:#061321; }
+.leaflet-control-attribution { background:rgba(3,16,31,.82)!important; color:#8196aa!important; }
+.leaflet-control-attribution a { color:#d4af37!important; }
+.official-records { border-color:#405972!important; border-radius:5px!important; }
+.official-records > div:first-child { background:#0b2745!important; border-bottom-color:#d4af37!important; }
+.official-records > div:last-child > div { border-radius:2px!important; border-color:#29435f!important; background:#071b30!important; }
+.official-records > div:last-child > div:nth-child(even) { background:#0a2139!important; }
+.official-records .text-emerald-500 { color:#d4af37!important; }
+.command-dashboard input,.command-dashboard select,.command-dashboard textarea { border-radius:4px!important; border-color:#405972!important; background:#07182b!important; }
+.command-dashboard button.bg-red-600 { background:#ef233c!important; }
+.command-dashboard button.bg-emerald-700,.command-dashboard button.bg-blue-600 { background:#d4af37!important; color:#101820!important; }
+.command-dashboard .rounded-xl,.command-dashboard .rounded-2xl { border-radius:6px; }
+@media (max-width:900px){.command-sidebar{width:310px}.agency-controls{flex-wrap:wrap}}

@@ -6,15 +6,69 @@ const cors = require('cors');
 const { execSync } = require('child_process');
 const DB = require('./database');
 
+const PORT = Number(process.env.PORT || 3001);
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const OPERATOR_TOKEN = process.env.OPERATOR_TOKEN || (IS_PRODUCTION ? '' : 'prahari-operator-demo-2026');
+const INGEST_TOKEN = process.env.INGEST_TOKEN || (IS_PRODUCTION ? '' : 'prahari-ingest-demo-2026');
+const VALID_CATEGORIES = new Set([
+  'LANDSLIDE', 'FLOOD', 'EARTHQUAKE', 'CRIME',
+  'MEDICAL', 'FIRE', 'MISSING', 'DISTURBANCE',
+]);
+const configuredOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
+if (!OPERATOR_TOKEN || !INGEST_TOKEN) {
+  throw new Error('OPERATOR_TOKEN and INGEST_TOKEN are required in production');
+}
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (configuredOrigins.length > 0) return configuredOrigins.includes(origin);
+  return /^http:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(origin);
+}
+
+function validateIncident(data) {
+  if (!data || typeof data !== 'object') return 'Incident payload must be an object';
+  if (!/^[A-Z0-9_-]{1,32}$/.test(data.nodeID || '')) return 'Invalid nodeID';
+  if (data.type === 'HEARTBEAT') return null;
+  if (!VALID_CATEGORIES.has(data.category)) return 'Invalid category';
+  const coords = data.coords || [data.lat ?? data.latitude, data.lon ?? data.longitude];
+  if (!Array.isArray(coords) || coords.length < 2 || !coords.every(Number.isFinite)) return 'Invalid coordinates';
+  if (data.citizenName != null && String(data.citizenName).length > 30) return 'Citizen name too long';
+  if ((data.note != null && String(data.note).length > 99) ||
+      (data.user_note != null && String(data.user_note).length > 99)) return 'Incident note too long';
+  return null;
+}
+
+const corsOptions = {
+  origin(origin, callback) {
+    callback(isAllowedOrigin(origin) ? null : new Error('Origin not allowed'), isAllowedOrigin(origin));
+  },
+};
+
 const app = express();
-app.use(cors());
-app.use(express.json());
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: "*" }
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '32kb' }));
+app.use('/api', (req, res, next) => {
+  if (req.path === '/health') return next();
+  const token = req.get('x-prahari-token') || req.query.token;
+  const expected = req.path === '/trigger' ? INGEST_TOKEN : OPERATOR_TOKEN;
+  if (token !== expected) return res.status(401).json({ error: 'Unauthorized' });
+  next();
 });
 
-const PORT = 3001;
+const server = http.createServer(app);
+const io = new Server(server, { cors: corsOptions, maxHttpBufferSize: 64 * 1024 });
+
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (token === OPERATOR_TOKEN) socket.data.role = 'operator';
+  else if (token === INGEST_TOKEN) socket.data.role = 'ingest';
+  else return next(new Error('Unauthorized'));
+  next();
+});
 const SERIAL_PORT_PATH = '/dev/ttyUSB0'; // ESP-B (Police Hub) detected here
 
 // ── In-Memory Recent Incidents Cache ─────────────────────────────────────────
@@ -148,7 +202,8 @@ app.get('/api/health', (req, res) => {
 // ── Direct trigger endpoint (for testing without ESP hardware) ─────────────
 app.post('/api/trigger', (req, res) => {
   const data = req.body;
-  if (!data || !data.nodeID) return res.status(400).json({ error: 'nodeID required' });
+  const validationError = validateIncident(data);
+  if (validationError) return res.status(400).json({ error: validationError });
   data.type = data.type || 'SOS';
   data.timestamp = new Date().toISOString();
 
@@ -356,7 +411,21 @@ parser.on('data', (data) => {
 
 // ── Handle Commands from Dashboard ─────────────────────────────────────────
 io.on('connection', (socket) => {
-  console.log(`Dashboard connected: ${socket.id}`);
+  console.log(`Client connected: ${socket.id} (${socket.data.role})`);
+
+  const ingestEvents = new Set(['new_incident', 'phone_ble_ack']);
+  const operatorEvents = new Set([
+    'request_initial_incidents', 'toggle_training_mode', 'acknowledge_incident',
+    'resolve_incident', 'escalate_incident', 'update_fir', 'clear_all_incidents',
+    'clear_training_data', 'start_training_session', 'end_training_session',
+    'start_officer_shift', 'end_officer_shift', 'get_active_officers',
+  ]);
+  socket.use(([event], next) => {
+    const role = socket.data.role;
+    if (role === 'operator' && operatorEvents.has(event)) return next();
+    if ((role === 'operator' || role === 'ingest') && ingestEvents.has(event)) return next();
+    next(new Error('Forbidden event'));
+  });
 
   // Debug: Log all incoming events
   socket.onAny((eventName, ...args) => {
@@ -376,6 +445,12 @@ io.on('connection', (socket) => {
 
   // Handle mock/simulated incidents from mock_injector or test scripts
   socket.on('new_incident', (data) => {
+    const validationError = validateIncident(data);
+    if (validationError) {
+      socket.emit('incident_rejected', { error: validationError });
+      return;
+    }
+
     // Ensure coordinates are in the format the dashboard expects ([lat, lon])
     if (!data.coords) {
       if (data.lat !== undefined && data.lon !== undefined) {
@@ -435,13 +510,14 @@ io.on('connection', (socket) => {
   // When an incident is acknowledged with dispatch data
   socket.on('acknowledge_incident', (data) => {
     const nodeID = typeof data === 'string' ? data : data.nodeID;
+    const alertID = typeof data === 'object' ? data.alert_id : null;
     console.log(`ACK for ${nodeID}`);
 
     if (typeof data === 'object' && data.commander) {
       console.log(`Dispatch: Commander=${data.commander}, Personnel=${data.personnel}`);
 
       if (trainingMode) {
-        const result = DB.acknowledgeTrainingIncident(nodeID, data);
+        const result = DB.acknowledgeTrainingIncident(nodeID, data, alertID);
         if (result) {
           console.log(`Training dispatched alert ${result.alertID}, response time: ${result.responseTime}s`);
           const updatePayload = {
@@ -453,7 +529,7 @@ io.on('connection', (socket) => {
           io.emit('incident_updated', updatePayload);
         }
       } else {
-        const result = DB.acknowledgeIncident(nodeID, data);
+        const result = DB.acknowledgeIncident(nodeID, data, alertID);
         if (result) {
           console.log(`Dispatched alert ${result.alertID}, response time: ${result.responseTime}s`);
           const updatePayload = {
@@ -467,9 +543,9 @@ io.on('connection', (socket) => {
       }
     } else {
       if (trainingMode) {
-        DB.acknowledgeTrainingIncident(nodeID);
+        DB.acknowledgeTrainingIncident(nodeID, {}, alertID);
       } else {
-        DB.acknowledgeIncident(nodeID);
+        DB.acknowledgeIncident(nodeID, {}, alertID);
       }
     }
 
@@ -482,7 +558,9 @@ io.on('connection', (socket) => {
   });
 
   // When an incident is resolved
-  socket.on('resolve_incident', (nodeID) => {
+  socket.on('resolve_incident', (payload) => {
+    const nodeID = typeof payload === 'string' ? payload : payload?.nodeID;
+    const alertID = typeof payload === 'object' ? payload.alert_id : null;
     if (!nodeID) {
       console.log('Invalid resolve: missing nodeID');
       return;
@@ -490,8 +568,8 @@ io.on('connection', (socket) => {
     console.log(`Resolving: ${nodeID}`);
 
     const result = trainingMode
-      ? DB.resolveTrainingIncident(nodeID)
-      : DB.resolveIncident(nodeID);
+      ? DB.resolveTrainingIncident(nodeID, alertID)
+      : DB.resolveIncident(nodeID, alertID);
 
     if (result) {
       const updatePayload = {
@@ -507,12 +585,15 @@ io.on('connection', (socket) => {
   });
 
   // When an incident is escalated
-  socket.on('escalate_incident', (nodeID) => {
+  socket.on('escalate_incident', (payload) => {
+    const nodeID = typeof payload === 'string' ? payload : payload?.nodeID;
+    const alertID = typeof payload === 'object' ? payload.alert_id : null;
+    if (!nodeID) return;
     console.log(`Escalating ${nodeID}`);
 
     const result = trainingMode
-      ? DB.escalateTrainingIncident(nodeID)
-      : DB.escalateIncident(nodeID);
+      ? DB.escalateTrainingIncident(nodeID, alertID)
+      : DB.escalateIncident(nodeID, alertID);
 
     if (result) {
       const updatePayload = { 
@@ -559,7 +640,8 @@ io.on('connection', (socket) => {
     // Flush any drill timers too
     drillTimers.forEach(t => clearTimeout(t));
     drillTimers = [];
-    // Clear the in-memory incident cache so fresh dashboards don't reload stale incidents
+    const cleared = DB.clearIncidents();
+    console.log(`Deleted ${cleared.alerts} alerts and ${cleared.dispatches} dispatch records`);
     recentIncidents.length = 0;
     // Broadcast to all connected dashboards so they clear too
     io.emit('all_incidents_cleared');
@@ -633,12 +715,14 @@ io.on('connection', (socket) => {
   // ── Phone BLE Acknowledgment ───────────────────────────────────────────
   // When a mobile phone detects an ESP-A BLE broadcast and confirms the incident
   socket.on('phone_ble_ack', (data) => {
-    const nodeID = data.nodeID || data;
+    const nodeID = typeof data === 'string' ? data : data?.nodeID;
+    if (!/^[A-Z0-9_-]{1,32}$/.test(nodeID || '')) return;
     console.log(`Phone BLE acknowledgment for incident at ${nodeID}`);
     io.emit('incident_ble_confirmed', {
       nodeID,
       volunteerName: data.volunteerName || 'Phone-Scanned',
       rssi: data.rssi || -60,
+      source: data.source || 'real',
       confirmedAt: new Date().toISOString(),
     });
   });
@@ -680,6 +764,7 @@ io.on('connection', (socket) => {
 
 function logStartup(port) {
   console.log(`Prahari-Link Backend running on http://localhost:${port}`);
+  if (!IS_PRODUCTION) console.warn('Using development demo tokens; set OPERATOR_TOKEN and INGEST_TOKEN for deployment.');
   console.log(`  Alerts DB: ${DB.getAlertCount()} records`);
   console.log(`  CSV Export: http://localhost:${port}/api/alerts/export/csv`);
   console.log(`  Monthly Report: http://localhost:${port}/api/reports/monthly?year=2026&month=6`);

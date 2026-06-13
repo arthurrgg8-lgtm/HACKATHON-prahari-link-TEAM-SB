@@ -1,5 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const { randomUUID } = require('crypto');
 
 const DB_PATH = path.join(__dirname, 'prahari_link.db');
 const db = new Database(DB_PATH);
@@ -124,9 +125,8 @@ db.exec(`
 
 // ─── Helper: Generate unique alert ID ──────────────────────────────────────
 function generateAlertID(nodeID) {
-  const now = new Date();
-  const ts = now.toISOString().replace(/[:.]/g, '').slice(0, 15);
-  return `${nodeID}_${ts}`;
+  const ts = new Date().toISOString().replace(/[-:.TZ]/g, '');
+  return `${nodeID}_${ts}_${randomUUID().slice(0, 8)}`;
 }
 
 // ─── Severity mapping ──────────────────────────────────────────────────────
@@ -192,11 +192,14 @@ const DB = {
   },
 
   /** Mark an incident as acknowledged and log dispatch info */
-  acknowledgeIncident(nodeID, dispatchData = {}) {
+  acknowledgeIncident(nodeID, dispatchData = {}, alertID = null) {
     const now = new Date().toISOString();
 
-    // Find the most recent active alert for this node
-    const alert = db.prepare(`
+    const alert = alertID ? db.prepare(`
+      SELECT alert_id, triggered_at FROM alerts
+      WHERE alert_id = ? AND status = 'active'
+      LIMIT 1
+    `).get(alertID) : db.prepare(`
       SELECT alert_id, triggered_at FROM alerts
       WHERE node_id = ? AND status = 'active'
       ORDER BY triggered_at DESC LIMIT 1
@@ -252,9 +255,13 @@ const DB = {
   },
 
   /** Resolve an incident directly without FIR */
-  resolveIncident(nodeID) {
+  resolveIncident(nodeID, alertID = null) {
     const now = new Date().toISOString();
-    const alert = db.prepare(`
+    const alert = alertID ? db.prepare(`
+      SELECT alert_id FROM alerts
+      WHERE alert_id = ? AND (status = 'dispatched' OR status = 'escalated')
+      LIMIT 1
+    `).get(alertID) : db.prepare(`
       SELECT alert_id FROM alerts
       WHERE node_id = ? AND (status = 'dispatched' OR status = 'escalated')
       ORDER BY triggered_at DESC LIMIT 1
@@ -288,9 +295,13 @@ const DB = {
   },
 
   /** Escalate an incident */
-  escalateIncident(nodeID) {
+  escalateIncident(nodeID, alertID = null) {
     const now = new Date().toISOString();
-    const alert = db.prepare(`
+    const alert = alertID ? db.prepare(`
+      SELECT alert_id FROM alerts
+      WHERE alert_id = ? AND status = 'active'
+      LIMIT 1
+    `).get(alertID) : db.prepare(`
       SELECT alert_id FROM alerts
       WHERE node_id = ? AND status = 'active'
       ORDER BY triggered_at DESC LIMIT 1
@@ -421,6 +432,14 @@ const DB = {
     return db.prepare('SELECT COUNT(*) as count FROM alerts').get().count;
   },
 
+  clearIncidents() {
+    return db.transaction(() => {
+      const dispatches = db.prepare('DELETE FROM dispatches').run().changes;
+      const alerts = db.prepare('DELETE FROM alerts').run().changes;
+      return { alerts, dispatches };
+    })();
+  },
+
   /** Log an incident to the training table (separate from live alerts) */
   logTrainingIncident(data) {
     const alertID = data.alert_id || generateAlertID(data.nodeID || 'TRAINING');
@@ -466,10 +485,14 @@ const DB = {
   },
 
   /** Mark a training incident as acknowledged and log dispatch info */
-  acknowledgeTrainingIncident(nodeID, dispatchData = {}) {
+  acknowledgeTrainingIncident(nodeID, dispatchData = {}, alertID = null) {
     const now = new Date().toISOString();
 
-    const alert = db.prepare(`
+    const alert = alertID ? db.prepare(`
+      SELECT alert_id, triggered_at FROM trainings
+      WHERE alert_id = ? AND status = 'active'
+      LIMIT 1
+    `).get(alertID) : db.prepare(`
       SELECT alert_id, triggered_at FROM trainings
       WHERE node_id = ? AND status = 'active'
       ORDER BY triggered_at DESC LIMIT 1
@@ -507,9 +530,13 @@ const DB = {
   },
 
   /** Resolve a training incident directly */
-  resolveTrainingIncident(nodeID) {
+  resolveTrainingIncident(nodeID, alertID = null) {
     const now = new Date().toISOString();
-    const alert = db.prepare(`
+    const alert = alertID ? db.prepare(`
+      SELECT alert_id FROM trainings
+      WHERE alert_id = ? AND (status = 'dispatched' OR status = 'escalated')
+      LIMIT 1
+    `).get(alertID) : db.prepare(`
       SELECT alert_id FROM trainings
       WHERE node_id = ? AND (status = 'dispatched' OR status = 'escalated')
       ORDER BY triggered_at DESC LIMIT 1
@@ -543,9 +570,13 @@ const DB = {
   },
 
   /** Escalate a training incident */
-  escalateTrainingIncident(nodeID) {
+  escalateTrainingIncident(nodeID, alertID = null) {
     const now = new Date().toISOString();
-    const alert = db.prepare(`
+    const alert = alertID ? db.prepare(`
+      SELECT alert_id FROM trainings
+      WHERE alert_id = ? AND status = 'active'
+      LIMIT 1
+    `).get(alertID) : db.prepare(`
       SELECT alert_id FROM trainings
       WHERE node_id = ? AND status = 'active'
       ORDER BY triggered_at DESC LIMIT 1

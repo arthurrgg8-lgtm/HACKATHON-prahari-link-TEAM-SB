@@ -154,6 +154,28 @@
 }
 
 /* Heartbeat node pulse animation */
+.node-green-pulse {
+  width: 18px;
+  height: 18px;
+  background: #22c55e;
+  border-radius: 50%;
+  border: 3px solid rgba(34, 197, 94, 0.4);
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.3);
+  animation: node-pulse 2.5s ease-in-out infinite;
+}
+
+@keyframes node-pulse {
+  0%, 100% {
+    transform: scale(0.95);
+    opacity: 0.75;
+    box-shadow: 0 0 4px rgba(34, 197, 94, 0.3);
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+    box-shadow: 0 0 12px rgba(34, 197, 94, 0.7), 0 0 20px rgba(34, 197, 94, 0.3);
+  }
+}
 
 /* Scrollbar styling */
 .overflow-y-auto::-webkit-scrollbar {

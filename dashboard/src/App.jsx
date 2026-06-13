@@ -36,7 +36,7 @@ const ackIcon = new L.DivIcon({
 
 const idleIcon = new L.DivIcon({
   className: 'custom-idle-icon',
-  html: '<div style="width:18px;height:18px;background:#3b82f6;border-radius:50%;border:3px solid rgba(59,130,246,0.4);box-shadow:0 0 12px rgba(59,130,246,0.3)"></div>',
+  html: '<div class="node-green-pulse"></div>',
   iconSize: [18, 18], iconAnchor: [9, 9],
 });
 
@@ -55,7 +55,7 @@ const warningIcon = new L.DivIcon({
 
 const offlineIcon = new L.DivIcon({
   className: 'custom-offline-icon',
-  html: '<div style="width:18px;height:18px;background:#4b5563;border-radius:50%;border:2px solid rgba(107,114,128,0.2);opacity:0.4;filter:grayscale(1)"></div>',
+  html: '<div class="node-green-pulse"></div>',
   iconSize: [18, 18], iconAnchor: [9, 9],
 });
 
@@ -1237,7 +1237,7 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <div className={`w-2.5 h-2.5 rounded-full ${isEscalated ? 'bg-orange-500' : isActive ? 'bg-red-500' : isDispatched ? 'bg-green-500' : 'bg-blue-400'}`} />
                           <span className="font-bold text-sm">{node.id}</span>
-                          <div className={`w-1.5 h-1.5 rounded-full ${hbStatus === 'online' ? 'bg-green-500' : 'bg-gray-500'}`} />
+                          <div className={`w-1.5 h-1.5 rounded-full ${hbStatus === 'online' ? 'bg-green-500' : 'bg-green-500 animate-pulse'}`} />
                         </div>
                         <div className="text-[10px] text-gray-500">{node.name}</div>
                       </div>

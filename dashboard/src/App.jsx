@@ -2097,7 +2097,7 @@ export default function App() {
         if (!ndInc) return null;
         const ndCat = getCategoryInfo(ndInc);
         return (
-          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center">
+          <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center">
             <div className="bg-gray-900 border border-purple-700 rounded-2xl p-6 w-full max-w-md mx-4">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -2293,7 +2293,7 @@ export default function App() {
 
       {/* Session Summary Modal */}
       {sessionSummary && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center">
+        <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center">
           <div className="bg-gray-900 border border-orange-700 rounded-2xl p-6 w-full max-w-sm mx-4">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">

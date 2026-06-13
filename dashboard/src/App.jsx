@@ -2263,10 +2263,8 @@ export default function App() {
                       ``,
                       `— Prahari-Link Command Center`,
                     ].filter(Boolean).join('\n');
-                    window.open(
-                      `https://mail.google.com/mail/?view=cm&fs=1&to=ndrrma@gmail.com,dte-dpr@nepalarmy.mil.np&su=${subject}&body=${encodeURIComponent(bodyLines)}`,
-                      '_blank'
-                    );
+                    const mailtoLink = `mailto:ndrrma@gmail.com,dte-dpr@nepalarmy.mil.np?subject=${subject}&body=${encodeURIComponent(bodyLines)}`;
+                    window.location.href = mailtoLink;
 
                     // Optimistic update: mark as NDRRMA escalated on the card
                     setIncidents(prev => prev.map(x =>

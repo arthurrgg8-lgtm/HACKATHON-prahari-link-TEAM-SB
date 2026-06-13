@@ -1,0 +1,51 @@
+# ── Node.js ──
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Build Output ──
+dist/
+build/
+*.tsbuildinfo
+
+# ── SQLite Database ──
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# ── Mobile APK Build Artifacts ──
+*.apk
+*.aab
+mobile_app/android/app/build/
+mobile_app/android/.gradle/
+mobile_app/android/local.properties
+*.hprof
+
+# ── Environment & Secrets ──
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# ── OS Files ──
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ── IDE / Editor ──
+.vscode/
+.idea/
+*.sublime-*
+
+# ── Logs ──
+*.log
+logs/
+
+# ── Arduino Build ──
+firmware/build/
+firmware/**/build/

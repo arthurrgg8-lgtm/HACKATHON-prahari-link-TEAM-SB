@@ -507,6 +507,66 @@ function NodeLabels({ nodes }) {
   return null;
 }
 
+function AgencyCoordinationTracker({ dispatchedAt }) {
+  const startTs = dispatchedAt || (Date.now() - 10000);
+  const [elapsed, setElapsed] = React.useState(Date.now() - startTs);
+
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      setElapsed(Date.now() - startTs);
+    }, 100);
+    return () => clearInterval(interval);
+  }, [startTs]);
+
+  const agencies = [
+    { name: 'Hospital Services', icon: '🏥', delay: 1200 },
+    { name: 'Nepal Army Command', icon: '🪖', delay: 2700 },
+    { name: 'Armed Police Force (APF)', icon: '🛡️', delay: 4200 },
+    { name: 'Local Volunteers Chain', icon: '🤝', delay: 5700 },
+  ];
+
+  return (
+    <div className="mt-2.5 p-2.5 bg-purple-950/20 border border-purple-900/30 rounded-xl">
+      <div className="text-[10px] text-purple-400 font-bold uppercase tracking-wider mb-2 flex items-center justify-between">
+        <span>📡 Agency Dispatch Coordination</span>
+        {elapsed < 6500 ? (
+          <span className="text-[8px] text-purple-300 animate-pulse font-mono">Syncing...</span>
+        ) : (
+          <span className="text-[8px] text-green-400 font-mono">Completed</span>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        {agencies.map((agency, idx) => {
+          const isDone = elapsed >= agency.delay;
+          const isCurrent = elapsed >= (agency.delay - 600) && elapsed < agency.delay;
+          return (
+            <div
+              key={idx}
+              className={`flex items-center justify-between text-[10px] transition-all duration-500 px-2 py-1 rounded-lg ${
+                isDone ? 'text-gray-300 bg-gray-800/20 border border-gray-700/10' : isCurrent ? 'text-purple-300 bg-purple-900/20 border border-purple-800/20 animate-pulse' : 'text-gray-600 opacity-20'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-xs">{agency.icon}</span>
+                <span className={isDone ? 'font-medium' : ''}>{agency.name}</span>
+              </div>
+              <div className="flex items-center gap-1.5 font-mono text-[8.5px]">
+                {isDone ? (
+                  <span className="text-green-400 font-bold">✓ INFORMED</span>
+                ) : isCurrent ? (
+                  <span className="text-purple-400 font-semibold animate-pulse">NOTIFYING...</span>
+                ) : (
+                  <span className="text-gray-700">PENDING</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function SMSAlertModal({ data, onDismiss, getCategoryInfo, openInGMaps, t, superiorName, superiorPhone }) {
   const [smsPhase, setSmsPhase] = React.useState('sending');
   const [dots, setDots] = React.useState('');
@@ -924,7 +984,7 @@ export default function App() {
           const matchByNodeId = !data.alert_id && inc.nodeID === data.nodeID && inc.status !== 'resolved';
           if (!updated && (matchByAlertId || matchByNodeId)) {
             updated = true;
-            return { ...inc, ...data };
+            return { ...inc, ...data, dispatchedAt: inc.dispatchedAt || Date.now() };
           }
           return inc;
         });
@@ -1124,7 +1184,7 @@ export default function App() {
         if (!updated && inc.nodeID === pendingNodeID &&
             inc.status !== 'resolved' && inc.status !== 'dispatched') {
           updated = true;
-          return { ...inc, status: 'dispatched', dispatchInfo: dispatchInfo };
+          return { ...inc, status: 'dispatched', dispatchInfo: dispatchInfo, dispatchedAt: Date.now() };
         }
         return inc;
       });
@@ -1757,21 +1817,24 @@ export default function App() {
                 )}
 
                 {(inc.status === 'dispatched' || inc.status === 'resolved') && inc.dispatchInfo && (
-                  <div className="mt-2 p-2 bg-blue-950/30 border border-blue-800/40 rounded-lg">
-                    <div className="text-[10px] text-blue-400 font-semibold mb-1">{'\u{1F694}'} Dispatched</div>
-                    <div className="text-xs text-gray-300"><span className="text-gray-500">Commander:</span> {inc.dispatchInfo.commander}</div>
-                    <div className="text-xs text-gray-300"><span className="text-gray-500">Personnel:</span> {inc.dispatchInfo.personnel}</div>
-                    {inc.dispatchInfo.equipment && (
-                      <div className="text-xs text-gray-300 mt-0.5">
-                        <span className="text-gray-500">Equipment:</span>{' '}
-                        {Array.isArray(inc.dispatchInfo.equipment)
-                          ? inc.dispatchInfo.equipment.join(', ')
-                          : typeof inc.dispatchInfo.equipment === 'string'
-                          ? inc.dispatchInfo.equipment.split('; ').join(', ')
-                          : ''}
-                      </div>
-                    )}
-                  </div>
+                  <>
+                    <div className="mt-2 p-2 bg-blue-950/30 border border-blue-800/40 rounded-lg">
+                      <div className="text-[10px] text-blue-400 font-semibold mb-1">{'\u{1F694}'} Dispatched</div>
+                      <div className="text-xs text-gray-300"><span className="text-gray-500">Commander:</span> {inc.dispatchInfo.commander}</div>
+                      <div className="text-xs text-gray-300"><span className="text-gray-500">Personnel:</span> {inc.dispatchInfo.personnel}</div>
+                      {inc.dispatchInfo.equipment && (
+                        <div className="text-xs text-gray-300 mt-0.5">
+                          <span className="text-gray-500">Equipment:</span>{' '}
+                          {Array.isArray(inc.dispatchInfo.equipment)
+                            ? inc.dispatchInfo.equipment.join(', ')
+                            : typeof inc.dispatchInfo.equipment === 'string'
+                            ? inc.dispatchInfo.equipment.split('; ').join(', ')
+                            : ''}
+                        </div>
+                      )}
+                    </div>
+                    <AgencyCoordinationTracker dispatchedAt={inc.dispatchedAt} />
+                  </>
                 )}
 
                 {/* FIR reference section */}

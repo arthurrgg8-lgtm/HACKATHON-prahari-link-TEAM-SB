@@ -4,6 +4,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.speech.tts.TextToSpeech;
+import android.media.Ringtone;
+import android.media.RingtoneManager;
+import android.net.Uri;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
@@ -130,6 +133,25 @@ public class PrahariLinkModule extends ReactContextBaseJavaModule {
         textToSpeech.setPitch(1.0f);
         textToSpeech.speak(message, TextToSpeech.QUEUE_FLUSH, null, "prahari_reassurance");
         promise.resolve("Speaking reassurance");
+    }
+
+    @ReactMethod
+    public void playNotificationSound(Promise promise) {
+        try {
+            Uri ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+            if (ringtoneUri == null) {
+                ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+            }
+            Ringtone r = RingtoneManager.getRingtone(reactContext.getApplicationContext(), ringtoneUri);
+            if (r != null) {
+                r.play();
+                promise.resolve("Sound played");
+            } else {
+                promise.reject("Error", "Ringtone object is null");
+            }
+        } catch (Exception e) {
+            promise.reject("Error", e.getMessage());
+        }
     }
 
     @Override

@@ -43,9 +43,9 @@ export default function LivenessCamera({ category, onVerified, onFailed, onCance
   useEffect(() => {
     if (!cameraReady || !hasPermission || status !== 'ready') return;
     clearTimeout(retryTimer.current);
-    retryTimer.current = setTimeout(() => captureAndDetect(), 350);
+    retryTimer.current = setTimeout(() => captureAndDetect(), 1000);
     return () => clearTimeout(retryTimer.current);
-  }, [cameraReady, hasPermission, retryCount]);
+  }, [cameraReady, hasPermission, retryCount, status]);
 
   const captureAndDetect = async () => {
     if (!isMounted.current || !cameraReady || captureInProgress.current) return;

@@ -222,6 +222,9 @@ export default function App() {
 
           // Buzz/Vibrate for volunteer — same pattern as BLE detection
           Vibration.vibrate([0, 500, 200, 500]);
+          if (Platform.OS === 'android' && PrahariLinkModule?.playNotificationSound) {
+            PrahariLinkModule.playNotificationSound().catch(e => console.log('Sound play error:', e.message));
+          }
 
           const coords = data.coords || [];
           const lat = coords[0] || data.lat || 0;
@@ -573,6 +576,9 @@ export default function App() {
                   
                   // Buzz/Vibrate for volunteer
                   Vibration.vibrate([0, 500, 200, 500]);
+                  if (Platform.OS === 'android' && PrahariLinkModule?.playNotificationSound) {
+                    PrahariLinkModule.playNotificationSound().catch(e => console.log('Sound play error:', e.message));
+                  }
                   
                   const nodeMap = { 'A': 'NODE_A', 'B': 'NODE_B', 'C': 'NODE_C', 'L': 'CMD_CTRL' };
                   const catMap = {

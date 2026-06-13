@@ -1,0 +1,28 @@
+{
+  "name": "PrahariLinkMobile",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@react-native-ml-kit/face-detection": "^2.0.1",
+    "expo": "~48.0.21",
+    "expo-battery": "~6.3.0",
+    "expo-location": "~15.1.1",
+    "expo-splash-screen": "~0.18.2",
+    "expo-status-bar": "~1.4.4",
+    "react": "18.2.0",
+    "react-native": "0.71.14",
+    "react-native-bluetooth-serial-next": "^1.1.2",
+    "react-native-ble-plx": "^3.2.0",
+    "react-native-vision-camera": "^3.9.2",
+    "react-native-worklets-core": "^1.6.3"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0"
+  },
+  "private": true
+}

@@ -38,7 +38,7 @@ sleep 1
 # ── Start Dashboard (port 5173) ──
 cd "$DASHBOARD_DIR"
 echo "[3/3] Starting dashboard on http://localhost:5173 ..."
-npx vite &
+npx vite --force &
 DASHBOARD_PID=$!
 sleep 2
 

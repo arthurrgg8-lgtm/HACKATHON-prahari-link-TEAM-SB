@@ -91,9 +91,17 @@ IDLE → SOS Received (Red LED flash 500ms) → ESP-NOW Send → Dashboard Alert
   → Back to IDLE — BLE broadcast expires after 60s
 ```
 
-### F. Security Model
+### F. Security Model & Reliability Logic
 - **Verified Access:** The mobile app is restricted to "Verified Responsible Persons" (Ward Members/Teachers) to ensure alert integrity and prevent spam.
 - **Production Vision:** Hardware uses **LoRa (Long Range Radio)** for 10-15km coverage. Demo uses **ESP-NOW** for P2P simulation.
+- **OWASP Top 10 Hardening (Mission Achievement):**
+    - **A03: Injection (Strict Input Validation):** Hardened the backend `validateIncident` logic with strict type checking (`typeof === 'string'`) to prevent length-bypass attacks via object/array payloads.
+    - **A05: Security Misconfiguration (Hardened Headers):** Implemented security middleware providing `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Strict-Transport-Security`.
+    - **A05: Security Misconfiguration (Rate Limiting):** Added a lightweight, in-memory rate limiter to the `/api/trigger` endpoint (30 requests/min per IP) to prevent automated DoS during demonstrations.
+    - **A07: Identification Failures (Timing-Safe Auth):** Upgraded all HTTP and WebSocket token validation to use `crypto.timingSafeEqual()`, protecting against timing-based side-channel attacks on `OPERATOR_TOKEN` and `INGEST_TOKEN`.
+- **Reliability: 5-Minute Auto-Escalation:**
+    - Implemented a server-side "Dead Man's Switch." If an incident is not acknowledged by a human operator within 300 seconds (5 minutes), the server automatically escalates the alert and sends a high-priority **Telegram notification** to superior officers.
+    - Dashboard integrated with a live, real-time countdown timer for each active incident, providing visual cues for critical response windows.
 
 ---
 

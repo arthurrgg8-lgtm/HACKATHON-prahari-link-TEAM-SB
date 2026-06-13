@@ -59,8 +59,15 @@ const offlineIcon = new L.DivIcon({
   iconSize: [18, 18], iconAnchor: [9, 9],
 });
 
+const cmdCtrlIcon = new L.DivIcon({
+  className: 'custom-cmd-ctrl-icon',
+  html: '<div style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:#0f172a;border:2.5px solid #a855f7;border-radius:50%;box-shadow:0 0 15px rgba(168,85,247,0.7);font-size:16px;line-height:1">🚨</div>',
+  iconSize: [32, 32], iconAnchor: [16, 16],
+});
+
 // Helper to pick the right node icon based on heartbeat status
 function getNodeIcon(nodeId, nodeStatuses) {
+  if (nodeId === 'CMD_CTRL') return cmdCtrlIcon;
   const hb = nodeStatuses[nodeId];
   if (!hb || hb.elapsed === undefined) return idleIcon;
   if (hb.status === 'online' && hb.elapsed < 30000) return onlineIcon;
@@ -481,11 +488,12 @@ function NodeLabels({ nodes }) {
   const map = useMap();
   useEffect(() => {
     const labels = nodes.map(node => {
+      const displayName = node.id === 'CMD_CTRL' ? 'COMMAND CENTER' : node.id.replace('_', ' ');
       const el = L.divIcon({
         className: 'node-label',
-        html: `<div style="color:${NODE_COLORS[node.id] || '#6b7280'};font-size:9px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,0.8),0 0 6px rgba(0,0,0,0.6);letter-spacing:0.5px;background:rgba(3,7,18,0.6);padding:1px 5px;border-radius:4px;backdrop-filter:blur(2px);border:1px solid ${NODE_COLORS[node.id] || '#6b7280'}40">${node.id}</div>`,
+        html: `<div style="color:${NODE_COLORS[node.id] || '#6b7280'};font-size:9px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,0.8),0 0 6px rgba(0,0,0,0.6);letter-spacing:0.5px;background:rgba(3,7,18,0.6);padding:1px 5px;border-radius:4px;backdrop-filter:blur(2px);border:1px solid ${NODE_COLORS[node.id] || '#6b7280'}40">${displayName}</div>`,
         iconSize: [0, 0],
-        iconAnchor: [0, -16],
+        iconAnchor: [0, node.id === 'CMD_CTRL' ? -22 : -16],
       });
       return L.marker(node.coords, { icon: el, interactive: false, zIndexOffset: 1000 }).addTo(map);
     });

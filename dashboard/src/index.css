@@ -253,3 +253,15 @@
 .command-dashboard button.bg-emerald-700,.command-dashboard button.bg-blue-600 { background:#d4af37!important; color:#101820!important; }
 .command-dashboard .rounded-xl,.command-dashboard .rounded-2xl { border-radius:6px; }
 @media (max-width:900px){.command-sidebar{width:310px}.agency-controls{flex-wrap:wrap}}
+
+/* Volunteer ripple animation for map simulation */
+@keyframes vol-ripple {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}

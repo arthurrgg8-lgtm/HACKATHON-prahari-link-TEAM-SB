@@ -231,6 +231,8 @@ void setup() {
     peerInfo.encrypt = false;
     esp_now_add_peer(&peerInfo);
     
+    Serial.print("ESP-A MAC Address: ");
+    Serial.println(WiFi.macAddress());
     Serial.println("ESP-NOW Ready");
     Serial.println("System initialized — BLE + Classic BT + ESP-NOW running");
 }

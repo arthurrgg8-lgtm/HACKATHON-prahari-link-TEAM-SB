@@ -67,6 +67,8 @@ void setup() {
     peerInfo.encrypt = false;
     esp_now_add_peer(&peerInfo);
     
+    Serial.print("ESP-B MAC Address: ");
+    Serial.println(WiFi.macAddress());
     Serial.println("ESP-NOW Hub Ready");
 }
 

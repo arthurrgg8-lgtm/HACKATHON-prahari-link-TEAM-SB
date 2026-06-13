@@ -150,6 +150,44 @@ const NODE_OFFLINE_TIMEOUT_MS = 60000;    // 60s → marked as offline
 const HEARTBEAT_CLEANUP_INTERVAL_MS = 300000; // 5 min cleanup cycle
 
 const nodeHeartbeats = new Map(); // nodeID → { lastSeen, battery_pct, solar_ok, lat, lon }
+const escalationTimers = new Map(); // alertID or nodeID_timestamp → timer
+
+// Function to trigger escalation (shared between manual and auto)
+function triggerEscalation(nodeID, alertID, isTraining) {
+  console.log(`[ESCALATION] Triggering for ${nodeID} (Alert: ${alertID})`);
+  
+  const result = isTraining
+    ? DB.escalateTrainingIncident(nodeID, alertID)
+    : DB.escalateIncident(nodeID, alertID);
+
+  if (result) {
+    const updatePayload = {
+      alert_id: result.alertID,
+      nodeID, status: 'escalated',
+      ...(isTraining ? { training: true } : {}),
+    };
+    updateCachedIncident(nodeID, updatePayload);
+    io.emit('incident_updated', updatePayload);
+
+    // 📢 Send Telegram escalation notification to superior officer
+    const inc = recentIncidents.find(i => result.alertID ? i.alert_id === result.alertID : i.nodeID === nodeID);
+    if (inc) {
+      const coords = inc.coords || [];
+      const lat = coords[0] || 0;
+      const lon = coords[1] || 0;
+      const msg = `🚨 <b>[PRAHARI-LINK] AUTO-ESCALATION ALERT</b> 🚨\n\n` +
+                  `⚠️ <b>Dispatch Timeout Expired (5 Min Delay)</b>\n\n` +
+                  `• <b>Node/Station</b>: ${inc.nodeID || 'UNKNOWN'}\n` +
+                  `• <b>Category</b>: ${inc.category || 'N/A'}\n` +
+                  `• <b>Citizen Name</b>: ${inc.citizenName || 'Anonymous'}\n` +
+                  `• <b>Note</b>: ${inc.note || 'Emergency SOS triggered'}\n` +
+                  `• <b>Coordinates</b>: ${lat}, ${lon}\n\n` +
+                  `🗺️ <a href="https://www.google.com/maps?q=${lat},${lon}">Open in Google Maps</a>\n\n` +
+                  `<i>Action: Contact the dispatch operator immediately to deploy forces.</i>`;
+      sendTelegramNotification(msg);
+    }
+  }
+}
 
 // Periodically prune stale heartbeat entries (>10 minutes old)
 setInterval(() => {
@@ -261,6 +299,7 @@ app.post('/api/trigger', (req, res) => {
   recentIncidents.unshift(incident);
   if (recentIncidents.length > MAX_CACHED_INCIDENTS) recentIncidents.pop();
   io.emit('new_incident', incident);
+  startAutoEscalationTimer(incident);
   console.log(`[HTTP TRIGGER] ${alertID} → ${data.nodeID} @ ${JSON.stringify(data.coords)}`);
   res.json({ success: true, alert_id: alertID, incident });
 });
@@ -330,6 +369,18 @@ app.get('/api/alerts/export/csv', (req, res) => {
 });
 
 // ── Monthly Report ─────────────────────────────────────────────────────────
+function startAutoEscalationTimer(evt) {
+  if (!evt.alert_id) return;
+  const isTraining = !!evt.training;
+  const timer = setTimeout(() => {
+    console.log(`[AUTO-ESCALATE] Timeout reached for ${evt.nodeID} (Alert: ${evt.alert_id})`);
+    triggerEscalation(evt.nodeID, evt.alert_id, isTraining);
+    escalationTimers.delete(evt.alert_id);
+  }, 5 * 60 * 1000); // 5 minutes
+  escalationTimers.set(evt.alert_id, timer);
+  console.log(`[TIMER] Started auto-escalation timer (5 min) for alert ${evt.alert_id}`);
+}
+
 app.get('/api/reports/monthly', (req, res) => {
   const year = parseInt(req.query.year) || new Date().getFullYear();
   const month = parseInt(req.query.month) || (new Date().getMonth() + 1);
@@ -352,40 +403,14 @@ app.get('/api/alerts', (req, res) => {
 });
 
 // ── Initialize Serial Port ─────────────────────────────────────────────────
+const { ReadlineParser } = require('@serialport/parser-readline');
+
 const port = new SerialPort({ path: SERIAL_PORT_PATH, baudRate: 115200 }, (err) => {
   if (err) return console.log('Serial port unavailable:', err.message);
   console.log(`Serial port ${SERIAL_PORT_PATH} opened`);
 });
 
-const { Transform } = require('stream');
-
-const parser = port.pipe(new Transform({
-  readableObjectMode: true,
-  transform(chunk, encoding, callback) {
-    this.buffer = (this.buffer || '') + chunk.toString();
-    // Try to find and emit complete JSON objects
-    while (this.buffer.length > 0) {
-      const start = this.buffer.indexOf('{');
-      if (start === -1) { this.buffer = ''; break; }
-      // Find matching closing brace
-      let depth = 0, end = -1;
-      for (let i = start; i < this.buffer.length; i++) {
-        if (this.buffer[i] === '{') depth++;
-        if (this.buffer[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
-      }
-      if (end === -1) break; // incomplete — wait for more data
-      const json = this.buffer.substring(start, end + 1);
-      this.buffer = this.buffer.substring(end + 1);
-      try {
-        JSON.parse(json); // validate
-        this.push(json);
-      } catch (e) {
-        // skip invalid JSON fragments
-      }
-    }
-    callback();
-  }
-}));
+const parser = port.pipe(new ReadlineParser({ delimiter: '\n' }));
 
 // Safe serial write — no crash if port is missing
 function safeSerialWrite(data) {
@@ -400,58 +425,81 @@ function safeSerialWrite(data) {
 }
 
 // ── Handle Data from Hardware ──────────────────────────────────────────────
-parser.on('data', (data) => {
-  console.log('--- Hardware Signal Received ---');
-  console.log('Raw:', data.substring(0, 200));
+parser.on('data', (line) => {
+  const cleanedLine = line.toString().trim();
+  if (!cleanedLine) return;
 
-  try {
-    const jsonData = JSON.parse(data);
+  if (cleanedLine.startsWith('{')) {
+    console.log('--- Hardware JSON Signal Received ---');
+    console.log('Raw:', cleanedLine);
 
-    // Ensure coordinates are in the format the dashboard expects ([lat, lon])
-    if (!jsonData.coords) {
-      if (jsonData.lat !== undefined && jsonData.lon !== undefined) {
-        jsonData.coords = [jsonData.lat, jsonData.lon];
-      } else if (jsonData.latitude !== undefined && jsonData.longitude !== undefined) {
-        jsonData.coords = [jsonData.latitude, jsonData.longitude];
+    try {
+      const jsonData = JSON.parse(cleanedLine);
+
+      // Ensure coordinates are in the format the dashboard expects ([lat, lon])
+      if (!jsonData.coords) {
+        if (jsonData.lat !== undefined && jsonData.lon !== undefined) {
+          jsonData.coords = [jsonData.lat, jsonData.lon];
+        } else if (jsonData.latitude !== undefined && jsonData.longitude !== undefined) {
+          jsonData.coords = [jsonData.latitude, jsonData.longitude];
+        }
       }
-    }
 
-    // Heartbeat packets just update the node's last-seen timestamp, no incident
-    if (jsonData.type === 'HEARTBEAT' && jsonData.nodeID) {
+      // Heartbeat packets just update the node's last-seen timestamp, no incident
+      if (jsonData.type === 'HEARTBEAT' && jsonData.nodeID) {
+        updateNodeHeartbeat(jsonData.nodeID, jsonData);
+        io.emit('node_heartbeat', { nodeID: jsonData.nodeID, ...jsonData });
+        return;
+      }
+
+      // Volunteer acknowledgment packets update active incidents
+      if (jsonData.type === 'VOL_ACK' && jsonData.nodeID) {
+        console.log(`[HARDWARE VOL_ACK] Volunteer ${jsonData.citizenName} is responding to node ${jsonData.nodeID}`);
+        io.emit('incident_ble_confirmed', {
+          nodeID: jsonData.nodeID,
+          volunteerName: jsonData.citizenName || 'Phone-Scanned',
+          rssi: jsonData.ai_confidence || -60,
+          source: 'real',
+          confirmedAt: new Date().toISOString(),
+        });
+        return;
+      }
+
+      const incident = {
+        ...jsonData,
+        timestamp: new Date().toISOString(),
+      };
+
+      console.log(`[GPS DEBUG] Hardware Node: ${jsonData.nodeID}, Coords: ${JSON.stringify(jsonData.coords)}`);
+
+      // Any incident from a node also counts as a heartbeat
       updateNodeHeartbeat(jsonData.nodeID, jsonData);
-      io.emit('node_heartbeat', { nodeID: jsonData.nodeID, ...jsonData });
-      return;
+
+      // Route to training or live table based on mode
+      if (trainingMode) {
+        const alertID = DB.logTrainingIncident(incident);
+        console.log(`Logged TRAINING alert from hardware: ${alertID}`);
+        const evt = { ...incident, alert_id: alertID, training: true };
+        recentIncidents.unshift(evt);
+        if (recentIncidents.length > MAX_CACHED_INCIDENTS) recentIncidents.pop();
+        io.emit('new_incident', evt);
+        startAutoEscalationTimer(evt);
+      } else {
+        const alertID = DB.logIncident(incident);
+        console.log(`Logged alert: ${alertID}`);
+        const evt = { ...incident, alert_id: alertID };
+        recentIncidents.unshift(evt);
+        if (recentIncidents.length > MAX_CACHED_INCIDENTS) recentIncidents.pop();
+        io.emit('new_incident', evt);
+        startAutoEscalationTimer(evt);
+      }
+    } catch (e) {
+      console.error('[SERIAL JSON ERROR] Failed to parse JSON line:', cleanedLine, e.message);
     }
-
-    const incident = {
-      ...jsonData,
-      timestamp: new Date().toISOString(),
-    };
-
-    console.log(`[GPS DEBUG] Hardware Node: ${jsonData.nodeID}, Coords: ${JSON.stringify(jsonData.coords)}`);
-
-    // Any incident from a node also counts as a heartbeat
-    updateNodeHeartbeat(jsonData.nodeID, jsonData);
-
-    // Route to training or live table based on mode
-    if (trainingMode) {
-      const alertID = DB.logTrainingIncident(incident);
-      console.log(`Logged TRAINING alert from hardware: ${alertID}`);
-      const evt = { ...incident, alert_id: alertID, training: true };
-      recentIncidents.unshift(evt);
-      if (recentIncidents.length > MAX_CACHED_INCIDENTS) recentIncidents.pop();
-      io.emit('new_incident', evt);
-    } else {
-      const alertID = DB.logIncident(incident);
-      console.log(`Logged alert: ${alertID}`);
-      const evt = { ...incident, alert_id: alertID };
-      recentIncidents.unshift(evt);
-      if (recentIncidents.length > MAX_CACHED_INCIDENTS) recentIncidents.pop();
-      io.emit('new_incident', evt);
-    }
-  } catch (e) {
-    console.log('Not a JSON packet, broadcasting as raw string.');
-    io.emit('raw_log', data);
+  } else {
+    // Print non-JSON lines (like debug logs) to the server console
+    console.log(`[HARDWARE LOG] ${cleanedLine}`);
+    io.emit('raw_log', cleanedLine);
   }
 });
 
@@ -493,6 +541,7 @@ io.on('connection', (socket) => {
   socket.on('new_incident', (data) => {
     const validationError = validateIncident(data);
     if (validationError) {
+      console.warn(`[SOCKET INGEST WARNING] Incident from nodeID "${data?.nodeID}" rejected: ${validationError}`, JSON.stringify(data));
       socket.emit('incident_rejected', { error: validationError });
       return;
     }
@@ -531,6 +580,7 @@ io.on('connection', (socket) => {
       recentIncidents.unshift(evt);
       if (recentIncidents.length > MAX_CACHED_INCIDENTS) recentIncidents.pop();
       io.emit('new_incident', evt);
+      startAutoEscalationTimer(evt);
     } else {
       const alertID = DB.logIncident(incident);
       console.log(`Logged alert from socket: ${alertID} (${incident.nodeID})`);
@@ -538,16 +588,23 @@ io.on('connection', (socket) => {
       recentIncidents.unshift(evt);
       if (recentIncidents.length > MAX_CACHED_INCIDENTS) recentIncidents.pop();
       io.emit('new_incident', evt);
+      startAutoEscalationTimer(evt);
     }
   });
 
   // Toggle training mode
   socket.on('toggle_training_mode', () => {
     trainingMode = !trainingMode;
-    // Clear drill timers when exiting training mode
     if (!trainingMode) {
+      // Clear drill timers when turning off training mode
       drillTimers.forEach(t => clearTimeout(t));
       drillTimers = [];
+      if (currentSessionID) {
+        console.log(`Training session ${currentSessionID} implicitly ended via toggle_training_mode`);
+        DB.endTrainingSession(currentSessionID);
+        io.emit('training_session_ended', { sessionID: currentSessionID, summary: null });
+        currentSessionID = null;
+      }
     }
     console.log(`Training mode ${trainingMode ? 'ENABLED' : 'DISABLED'}`);
     io.emit('training_mode_state', { enabled: trainingMode });
@@ -557,7 +614,14 @@ io.on('connection', (socket) => {
   socket.on('acknowledge_incident', (data) => {
     const nodeID = typeof data === 'string' ? data : data.nodeID;
     const alertID = typeof data === 'object' ? data.alert_id : null;
-    console.log(`ACK for ${nodeID}`);
+    console.log(`ACK for ${nodeID} (Alert: ${alertID})`);
+
+    // Clear escalation timer if it exists
+    if (alertID && escalationTimers.has(alertID)) {
+      clearTimeout(escalationTimers.get(alertID));
+      escalationTimers.delete(alertID);
+      console.log(`[TIMER] Cleared escalation timer for alert ${alertID}`);
+    }
 
     if (typeof data === 'object' && data.commander) {
       console.log(`Dispatch: Commander=${data.commander}, Personnel=${data.personnel}`);
@@ -613,6 +677,12 @@ io.on('connection', (socket) => {
     }
     console.log(`Resolving: ${nodeID}`);
 
+    // Also clear timer here just in case it was resolved before ACK
+    if (alertID && escalationTimers.has(alertID)) {
+      clearTimeout(escalationTimers.get(alertID));
+      escalationTimers.delete(alertID);
+    }
+
     const result = trainingMode
       ? DB.resolveTrainingIncident(nodeID, alertID)
       : DB.resolveIncident(nodeID, alertID);
@@ -630,44 +700,19 @@ io.on('connection', (socket) => {
     }
   });
 
-  // When an incident is escalated
+  // When an incident is escalated manually
   socket.on('escalate_incident', (payload) => {
     const nodeID = typeof payload === 'string' ? payload : payload?.nodeID;
     const alertID = typeof payload === 'object' ? payload.alert_id : null;
     if (!nodeID) return;
-    console.log(`Escalating ${nodeID}`);
-
-    const result = trainingMode
-      ? DB.escalateTrainingIncident(nodeID, alertID)
-      : DB.escalateIncident(nodeID, alertID);
-
-    if (result) {
-      const updatePayload = { 
-        alert_id: result.alertID,
-        nodeID, status: 'escalated',
-        ...(trainingMode ? { training: true } : {}),
-      };
-      updateCachedIncident(nodeID, updatePayload);
-      io.emit('incident_updated', updatePayload);
-
-      // 📢 Send Telegram escalation notification to superior officer
-      const inc = recentIncidents.find(i => result.alertID ? i.alert_id === result.alertID : i.nodeID === nodeID);
-      if (inc) {
-        const coords = inc.coords || [];
-        const lat = coords[0] || 0;
-        const lon = coords[1] || 0;
-        const msg = `🚨 <b>[PRAHARI-LINK] ESCALATION ALERT</b> 🚨\n\n` +
-                    `⚠️ <b>Dispatch Timeout Expired (5 Min Delay)</b>\n\n` +
-                    `• <b>Node/Station</b>: ${inc.nodeID || 'UNKNOWN'}\n` +
-                    `• <b>Category</b>: ${inc.category || 'N/A'}\n` +
-                    `• <b>Citizen Name</b>: ${inc.citizenName || 'Anonymous'}\n` +
-                    `• <b>Note</b>: ${inc.note || 'Emergency SOS triggered'}\n` +
-                    `• <b>Coordinates</b>: ${lat}, ${lon}\n\n` +
-                    `🗺️ <a href="https://www.google.com/maps?q=${lat},${lon}">Open in Google Maps</a>\n\n` +
-                    `<i>Action: Contact the dispatch operator immediately to deploy forces.</i>`;
-        sendTelegramNotification(msg);
-      }
+    
+    // Clear the timer since it's now escalated manually
+    if (alertID && escalationTimers.has(alertID)) {
+      clearTimeout(escalationTimers.get(alertID));
+      escalationTimers.delete(alertID);
     }
+
+    triggerEscalation(nodeID, alertID, trainingMode);
   });
 
   // When an incident has an FIR filed
@@ -723,6 +768,10 @@ io.on('connection', (socket) => {
   // ── Training Session Management ─────────────────────────────────────────
 
   socket.on('start_training_session', ({ traineeName, scenarioID }) => {
+    trainingMode = true;
+    console.log(`Training mode ENABLED due to start_training_session`);
+    io.emit('training_mode_state', { enabled: true });
+
     const scenario = DRILL_SCENARIOS.find(s => s.id === scenarioID);
     const sName = scenario ? scenario.name : 'Free Drill (No Scenario)';
     currentSessionID = DB.startTrainingSession(traineeName, scenarioID, sName);
@@ -769,6 +818,10 @@ io.on('connection', (socket) => {
     // Clear any pending drill timers
     drillTimers.forEach(t => clearTimeout(t));
     drillTimers = [];
+
+    trainingMode = false;
+    console.log(`Training mode DISABLED due to end_training_session`);
+    io.emit('training_mode_state', { enabled: false });
 
     const summary = DB.endTrainingSession(currentSessionID);
     console.log(`Training session ended: ${currentSessionID}`, summary);

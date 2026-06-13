@@ -16,6 +16,7 @@ import java.util.Locale;
 public class PrahariLinkModule extends ReactContextBaseJavaModule {
     private final ReactApplicationContext reactContext;
     private TextToSpeech textToSpeech;
+    private Ringtone activeRingtone;
 
     public PrahariLinkModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -149,6 +150,68 @@ public class PrahariLinkModule extends ReactContextBaseJavaModule {
             } else {
                 promise.reject("Error", "Ringtone object is null");
             }
+        } catch (Exception e) {
+            promise.reject("Error", e.getMessage());
+        }
+    }
+
+    @ReactMethod
+    public void playSiren(Promise promise) {
+        try {
+            if (activeRingtone != null && activeRingtone.isPlaying()) {
+                promise.resolve("Siren already playing");
+                return;
+            }
+            Uri ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+            if (ringtoneUri == null) {
+                ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+            }
+            activeRingtone = RingtoneManager.getRingtone(reactContext.getApplicationContext(), ringtoneUri);
+            if (activeRingtone != null) {
+                activeRingtone.play();
+                promise.resolve("Siren started");
+            } else {
+                promise.reject("Error", "Ringtone is null");
+            }
+        } catch (Exception e) {
+            promise.reject("Error", e.getMessage());
+        }
+    }
+
+    @ReactMethod
+    public void stopSiren(Promise promise) {
+        try {
+            if (activeRingtone != null) {
+                activeRingtone.stop();
+                activeRingtone = null;
+                promise.resolve("Siren stopped");
+            } else {
+                promise.resolve("No active siren");
+            }
+        } catch (Exception e) {
+            promise.reject("Error", e.getMessage());
+        }
+    }
+
+    @ReactMethod
+    public void setConfigString(String key, String value, Promise promise) {
+        try {
+            SharedPreferences sharedPref = reactContext.getSharedPreferences("PrahariLinkPrefs", Context.MODE_PRIVATE);
+            SharedPreferences.Editor editor = sharedPref.edit();
+            editor.putString(key, value);
+            editor.apply();
+            promise.resolve("Config " + key + " updated to: " + value);
+        } catch (Exception e) {
+            promise.reject("Error", e.getMessage());
+        }
+    }
+
+    @ReactMethod
+    public void getConfigString(String key, String defaultValue, Promise promise) {
+        try {
+            SharedPreferences sharedPref = reactContext.getSharedPreferences("PrahariLinkPrefs", Context.MODE_PRIVATE);
+            String value = sharedPref.getString(key, defaultValue);
+            promise.resolve(value);
         } catch (Exception e) {
             promise.reject("Error", e.getMessage());
         }

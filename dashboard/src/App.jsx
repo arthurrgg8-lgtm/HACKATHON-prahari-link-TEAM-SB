@@ -93,6 +93,28 @@ const escalatedIcon = new L.DivIcon({
   html: '<div style="width:24px;height:24px;background:#f97316;border-radius:50%;border:3px solid white;box-shadow:0 0 20px #f97316,0 0 40px #f97316"></div>',
   iconSize: [24, 24], iconAnchor: [12, 12],
 });
+
+const volunteerIcon = new L.DivIcon({
+  className: 'custom-volunteer-icon',
+  html: `
+    <div style="display:flex;align-items:center;justify-content:center;width:32px;height:32px">
+      <div class="volunteer-ripple" style="position:absolute;width:100%;height:100%;border-radius:50%;background:rgba(16,185,129,0.3);animation:vol-ripple 1.5s infinite"></div>
+      <div style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;background:#10b981;border:2px solid white;border-radius:50%;font-size:11px;z-index:10;box-shadow:0 1px 4px rgba(0,0,0,0.3)">🚶</div>
+    </div>
+  `,
+  iconSize: [32, 32], iconAnchor: [16, 16],
+});
+
+const volunteerArrivedIcon = new L.DivIcon({
+  className: 'custom-volunteer-arrived-icon',
+  html: `
+    <div style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;background:#059669;border:2px solid white;border-radius:50%;font-size:11px;box-shadow:0 0 10px rgba(5,150,105,0.6)">
+      🤝
+    </div>
+  `,
+  iconSize: [24, 24], iconAnchor: [12, 12],
+});
+
 const STATIC_NODES = [
   { id: 'NODE_A', name: 'Node A Village Relay', coords: [27.694532, 83.445651] },
   { id: 'NODE_B', name: 'Node B Village Relay', coords: [27.686999, 83.443924] },
@@ -886,13 +908,15 @@ export default function App() {
     };
   }, [activeCriticalIncident]);
 
-  // Dynamically derive nodes from heartbeats/statuses
+  // Dynamically derive nodes from heartbeats/statuses (ignoring citizen phones and invalid coordinates)
   const dynamicNodes = React.useMemo(() => {
-    return Object.entries(nodeStatuses).map(([id, s]) => ({
-      id,
-      name: `Active Node: ${id}`,
-      coords: [s.lat, s.lon]
-    }));
+    return Object.entries(nodeStatuses)
+      .filter(([id, s]) => id !== 'CITIZEN_PHONE' && id !== 'UNKNOWN' && s.lat && s.lon && s.lat !== 0 && s.lon !== 0)
+      .map(([id, s]) => ({
+        id,
+        name: `Active Node: ${id}`,
+        coords: [s.lat, s.lon]
+      }));
   }, [nodeStatuses]);
 
   const [lastIncident, setLastIncident] = useState(null);
@@ -931,12 +955,36 @@ export default function App() {
   const [showSuperiorSettings, setShowSuperiorSettings] = useState(false);
   const [pendingTimerKey, setPendingTimerKey] = useState(null);
   const [firInputs, setFirInputs] = useState({});
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setCurrentTime(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
   const [volunteerData, setVolunteerData] = useState({}); // { nodeID: { incident, volunteers: [{name, dist, status}] } }
   const [bleConfirmedNodes, setBleConfirmedNodes] = useState({}); // { nodeID: { volunteerName, rssi, confirmedAt } }
+  const [activeVolunteerToast, setActiveVolunteerToast] = useState(null);
+  const [animationTick, setAnimationTick] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setAnimationTick(t => t + 1);
+    }, 150);
+    return () => clearInterval(timer);
+  }, []);
   const volunteerTimersRef = useRef({});
   const incidentsRef = useRef(incidents);
   const escalationTimersRef = useRef({});
   useEffect(() => { incidentsRef.current = incidents; }, [incidents]);
+
+  const getNodeCoords = useCallback((nodeID) => {
+    const staticNode = STATIC_NODES.find(n => n.id === nodeID);
+    if (staticNode) return staticNode.coords;
+    const dynNode = dynamicNodes.find(n => n.id === nodeID);
+    if (dynNode) return dynNode.coords;
+    const status = nodeStatuses[nodeID];
+    if (status && status.lat && status.lon) return [status.lat, status.lon];
+    return [27.694532, 83.445651]; // fallback default
+  }, [dynamicNodes, nodeStatuses]);
 
   const getCategoryInfo = (inc) => {
     let info;
@@ -987,21 +1035,20 @@ export default function App() {
     socket.emit('request_initial_incidents');
 
     socket.on('new_incident', (data) => {
-      setIncidents(prev => {
-        // Prevent duplicates
-        if (prev.some(inc => (inc.alert_id && inc.alert_id === data.alert_id) || (inc.nodeID === data.nodeID && inc.timestamp === data.timestamp))) {
-          return prev;
-        }
-        
-        console.log('INCIDENT:', data);
-        const newIncidents = [data, ...prev];
-        setLastIncident(data);
-        
-        // Trigger siren/alert for both real and simulated incidents (demo-friendly)
-        setAlertActive(true);
-        startSiren().catch(() => {});
-        return newIncidents;
-      });
+      const isDuplicate = incidentsRef.current.some(inc => 
+        (inc.alert_id && inc.alert_id === data.alert_id) || 
+        (inc.nodeID === data.nodeID && inc.timestamp === data.timestamp)
+      );
+      if (isDuplicate) return;
+
+      console.log('INCIDENT:', data);
+      setIncidents(prev => [data, ...prev]);
+      setLastIncident(data);
+      
+      // Trigger siren/alert for both real and simulated incidents (demo-friendly)
+      setAlertActive(true);
+      startSiren().catch(() => {});
+
 
       // ── Simulate volunteer BLE notifications ──────────────────────────
       if (data.source === 'simulated' || trainingMode) {
@@ -1015,7 +1062,15 @@ export default function App() {
         for (let v = 0; v < volCount; v++) {
           const name = volunteerNames[Math.floor(Math.random() * volunteerNames.length)];
           const dist = Math.round(40 + Math.random() * 460); // 40-500m
-          volunteers.push({ name, dist, status: 'notified', id: `${data.nodeID}_vol_${v}_${Date.now()}`, source: 'simulated' });
+          const angle = Math.random() * 2 * Math.PI;
+          volunteers.push({ 
+            name, 
+            dist, 
+            status: 'notified', 
+            id: `${data.nodeID}_vol_${v}_${Date.now()}`, 
+            source: 'simulated',
+            angle
+          });
         }
         setVolunteerData(prev => ({
           ...prev,
@@ -1030,9 +1085,12 @@ export default function App() {
               ...prev,
               [data.nodeID]: {
                 ...prev[data.nodeID],
-                volunteers: prev[data.nodeID].volunteers.map(v => ({
-                  ...v, status: v.status === 'notified' ? 'responding' : v.status
-                }))
+                volunteers: prev[data.nodeID].volunteers.map(v => {
+                  if (v.status === 'notified') {
+                    return { ...v, status: 'responding', respondedAt: Date.now() };
+                  }
+                  return v;
+                })
               }
             };
           });
@@ -1245,6 +1303,7 @@ export default function App() {
       setPendingNDRRMANodeID(null);
       setBleConfirmedNodes({});
       setNdrrmAConfirmed(false);
+      setActiveVolunteerToast(null);
     });
 
     // Phone BLE acknowledgment from real phone or mock injector
@@ -1260,12 +1319,19 @@ export default function App() {
         }
       }));
 
-      // If it's a real acceptance from the app, add to volunteer list as 'accepted'
+      // Trigger visual toast notification on the dashboard
+      const volName = data.volunteerName || 'Citizen Volunteer';
+      setActiveVolunteerToast({ volunteerName: volName, nodeID: data.nodeID, rssi: data.rssi || -60 });
+      setTimeout(() => {
+        setActiveVolunteerToast(prev => prev && prev.volunteerName === volName ? null : prev);
+      }, 6000);
+
+      // If it's a real acceptance from the app, add to volunteer list as 'responding' to start simulation
       if (data.source === 'real') {
         setVolunteerData(prev => {
           const current = prev[data.nodeID] || { incident: { nodeID: data.nodeID }, volunteers: [] };
           // Prevent duplicates
-          if (current.volunteers.some(v => v.name === data.volunteerName)) return prev;
+          if (current.volunteers.some(v => v.name === volName)) return prev;
           
           return {
             ...prev,
@@ -1273,17 +1339,36 @@ export default function App() {
               ...current,
               volunteers: [
                 { 
-                  id: `real_vol_${data.volunteerName}_${Date.now()}`, 
-                  name: data.volunteerName, 
-                  status: 'accepted', 
-                  dist: Math.abs(data.rssi) * 2, // Mock distance based on signal
-                  source: 'real' 
+                  id: `real_vol_${volName}_${Date.now()}`, 
+                  name: volName, 
+                  status: 'responding', 
+                  dist: Math.abs(data.rssi || -60) * 2, // Mock distance based on signal
+                  source: 'real',
+                  angle: Math.random() * 2 * Math.PI,
+                  respondedAt: Date.now()
                 },
                 ...current.volunteers
               ]
             }
           };
         });
+
+        // Auto-arrive real volunteer after 10s
+        const realArriveTimer = setTimeout(() => {
+          setVolunteerData(prev => {
+            if (!prev[data.nodeID]) return prev;
+            return {
+              ...prev,
+              [data.nodeID]: {
+                ...prev[data.nodeID],
+                volunteers: prev[data.nodeID].volunteers.map(v => 
+                  v.name === volName ? { ...v, status: 'arrived' } : v
+                )
+              }
+            };
+          });
+        }, 10000);
+        volunteerTimersRef.current[`real_arr_${volName}_${Date.now()}`] = realArriveTimer;
       }
     });
 
@@ -1425,6 +1510,7 @@ export default function App() {
     setShowNDRRMAForm(false);
     setPendingNDRRMANodeID(null);
     setNdrrmAConfirmed(false);
+    setActiveVolunteerToast(null);
   }, [t, stopSiren]);
 
   const toggleEquipment = (item) => {
@@ -1927,6 +2013,33 @@ export default function App() {
                   <span className="text-[10px] text-gray-500 font-mono">{new Date(inc.timestamp).toLocaleTimeString()}</span>
                 </div>
 
+                {/* Visible 5-minute countdown timer */}
+                {isActive && !isEscalated && (
+                  <div className="mt-2 p-1.5 bg-gray-950/40 border border-gray-800/50 rounded-lg">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-[9px] font-bold text-gray-500 uppercase tracking-wider">{t.timeRemaining}</span>
+                      <span className={`text-[10px] font-mono font-bold ${
+                        (ESCALATION_TIMEOUT - Math.floor((currentTime - new Date(inc.timestamp).getTime()) / 1000)) < 60 ? 'text-red-400 animate-pulse' : 'text-blue-400'
+                      }`}>
+                        {(() => {
+                          const rem = Math.max(0, ESCALATION_TIMEOUT - Math.floor((currentTime - new Date(inc.timestamp).getTime()) / 1000));
+                          const m = Math.floor(rem / 60);
+                          const s = rem % 60;
+                          return `${m}:${s.toString().padStart(2, '0')}`;
+                        })()}
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-800 h-1 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-1000 ${
+                          (ESCALATION_TIMEOUT - Math.floor((currentTime - new Date(inc.timestamp).getTime()) / 1000)) < 60 ? 'bg-red-500' : 'bg-blue-500'
+                        }`}
+                        style={{ width: `${Math.max(0, (ESCALATION_TIMEOUT - Math.floor((currentTime - new Date(inc.timestamp).getTime()) / 1000)) / ESCALATION_TIMEOUT) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${cat.color}`}>{cat.label}</span>
                   {cat.severity && <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${cat.sevColor}`}>{cat.severity}</span>}
@@ -2356,6 +2469,103 @@ export default function App() {
               </Marker>
             );
           })}
+          {/* Volunteer Simulation Markers and Paths */}
+          {Object.entries(volunteerData).map(([nodeID, vd]) => {
+            const destCoords = getNodeCoords(nodeID);
+            if (!destCoords) return null;
+
+            return vd.volunteers.map(vol => {
+              if (vol.status === 'notified') {
+                // Notified volunteers are stationary at their start locations
+                const startLat = destCoords[0] + (vol.dist / 111320) * Math.sin(vol.angle || 0);
+                const startLon = destCoords[1] + (vol.dist / (111320 * Math.cos(destCoords[0] * Math.PI / 180))) * Math.cos(vol.angle || 0);
+                return (
+                  <Marker 
+                    key={vol.id} 
+                    position={[startLat, startLon]} 
+                    icon={new L.DivIcon({
+                      className: 'custom-vol-notified-icon',
+                      html: '<div style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;background:#f59e0b;border:2.5px solid white;border-radius:50%;font-size:9px;box-shadow:0 0 8px rgba(245,158,11,0.5)">🔔</div>',
+                      iconSize: [18, 18], iconAnchor: [9, 9]
+                    })}
+                  >
+                    <Popup>
+                      <div className="text-gray-900 text-xs">
+                        <div className="font-bold">{vol.name}</div>
+                        <div className="text-gray-500">Notified (Distance: {vol.dist}m)</div>
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+              }
+
+              const angle = vol.angle || 0;
+              const startLat = destCoords[0] + (vol.dist / 111320) * Math.sin(angle);
+              const startLon = destCoords[1] + (vol.dist / (111320 * Math.cos(destCoords[0] * Math.PI / 180))) * Math.cos(angle);
+              
+              let currentLat = startLat;
+              let currentLon = startLon;
+              let isArrived = vol.status === 'arrived';
+              
+              if (vol.status === 'responding' && vol.respondedAt) {
+                const duration = 10000; // 10 seconds travel time
+                const elapsed = Date.now() - vol.respondedAt;
+                const fraction = Math.min(1, Math.max(0, elapsed / duration));
+                currentLat = startLat + (destCoords[0] - startLat) * fraction;
+                currentLon = startLon + (destCoords[1] - startLon) * fraction;
+                if (fraction >= 1) {
+                  isArrived = true;
+                }
+              } else if (vol.status === 'arrived') {
+                currentLat = destCoords[0];
+                currentLon = destCoords[1];
+              }
+
+              const markerIcon = isArrived ? volunteerArrivedIcon : volunteerIcon;
+
+              return (
+                <React.Fragment key={vol.id}>
+                  {/* Path to incident */}
+                  {!isArrived && (
+                    <Polyline
+                      positions={[[startLat, startLon], destCoords]}
+                      pathOptions={{
+                        color: '#10b981',
+                        weight: 2,
+                        dashArray: '5, 8',
+                        opacity: 0.4
+                      }}
+                    />
+                  )}
+                  {!isArrived && (
+                    <Polyline
+                      positions={[[currentLat, currentLon], destCoords]}
+                      pathOptions={{
+                        color: '#10b981',
+                        weight: 2.5,
+                        dashArray: '6, 6',
+                        opacity: 0.8,
+                        className: 'comm-line' // animated flowing dash
+                      }}
+                    />
+                  )}
+                  {/* Volunteer Marker */}
+                  <Marker 
+                    position={[currentLat, currentLon]} 
+                    icon={markerIcon}
+                  >
+                    <Popup>
+                      <div className="text-gray-900 text-xs">
+                        <div className="font-bold">{vol.name} {vol.source === 'real' ? '(Real Volunteer)' : ''}</div>
+                        <div className="text-gray-600">Status: <span className="text-green-600 font-bold">{isArrived ? 'Arrived' : 'On the way...'}</span></div>
+                        <div className="text-gray-500">Distance: {vol.dist}m</div>
+                      </div>
+                    </Popup>
+                  </Marker>
+                </React.Fragment>
+              );
+            });
+          })}
           <MapBoundsFitter nodes={[...STATIC_NODES, ...dynamicNodes.filter(dn => !STATIC_NODES.some(sn => sn.id === dn.id))]} />
           {lastIncident && <MapFlyTo center={getMapCoords(lastIncident)} />}
           <CoverageOverlay nodes={STATIC_NODES} activeNodeIDs={activeNodeIDs} />
@@ -2763,6 +2973,31 @@ export default function App() {
         superiorName={t.smsSuperiorName}
         superiorPhone={t.smsSuperiorPhone}
       />}
+
+      {/* 🚨 Volunteer Toast Alert */}
+      {activeVolunteerToast && (
+        <div 
+          className="fixed bottom-6 right-6 z-[9999] bg-emerald-950/95 backdrop-blur-md border border-emerald-500/40 rounded-2xl p-4 shadow-[0_10px_45px_rgba(16,185,129,0.3)] w-[300px] flex items-start gap-3"
+          style={{ animation: 'sms-slide-in 0.4s ease-out' }}
+        >
+          <div className="text-xl bg-emerald-500/20 text-emerald-400 p-2.5 rounded-xl flex items-center justify-center">🏃</div>
+          <div className="flex-1">
+            <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Volunteer Responding</div>
+            <div className="text-xs text-gray-200 mt-1">
+              <strong>{activeVolunteerToast.volunteerName}</strong> has accepted the call and is responding to <strong>{activeVolunteerToast.nodeID}</strong>.
+            </div>
+            <div className="text-[9px] text-gray-500 mt-1.5 font-mono">
+              BLE signal: {activeVolunteerToast.rssi} dBm (Help is going...)
+            </div>
+          </div>
+          <button 
+            onClick={() => setActiveVolunteerToast(null)}
+            className="text-gray-500 hover:text-white transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

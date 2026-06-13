@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, TextInput, Alert, SafeAreaView, PermissionsAndroid, Platform, ScrollView, NativeModules, AppState, InteractionManager, Image, Vibration, Linking } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, TextInput, Alert, SafeAreaView, PermissionsAndroid, Platform, ScrollView, NativeModules, AppState, InteractionManager, Image, Vibration, Linking, Modal } from 'react-native';
 import BluetoothSerial from 'react-native-bluetooth-serial-next';
 import * as Location from 'expo-location';
 import * as Battery from 'expo-battery';
@@ -25,11 +25,6 @@ const decodeBase64 = (input) => {
 
 const bleManager = new BleManager();
 const { PrahariLinkModule } = NativeModules;
-
-// ── Backend Server URL ──────────────────────────────────────────────────────
-// Change this to your laptop's IP when testing on physical devices
-// e.g. 'http://192.168.1.100:3001'
-const BACKEND_URL = 'http://192.168.80.159:3001';
 
 const hexToRgba = (hex, alpha) => {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -152,6 +147,10 @@ function PoliceBrand({ lang, title, compact = false }) {
 
 export default function App() {
   const [connected, setConnected] = useState(false);
+  const [isSocketConnected, setIsSocketConnected] = useState(false);
+  const [backendUrl, setBackendUrl] = useState('http://192.168.80.159:3001');
+  const [showIpModal, setShowIpModal] = useState(false);
+  const [tempIpText, setTempIpText] = useState('');
   const [location, setLocation] = useState(null);
   const [ackReceived, setAckReceived] = useState(false);
   const [ackNodeID, setAckNodeID] = useState('');
@@ -185,67 +184,97 @@ export default function App() {
   const [showValidationErrors, setShowValidationErrors] = useState(false);
   const socketRef = useRef(null);
 
+  // Load saved backend URL on startup
+  useEffect(() => {
+    if (Platform.OS === 'android' && PrahariLinkModule?.getConfigString) {
+      PrahariLinkModule.getConfigString('backend_url', 'http://192.168.80.159:3001')
+        .then(url => {
+          if (url) {
+            setBackendUrl(url);
+          }
+        })
+        .catch(err => console.log('Load config error:', err));
+    }
+  }, []);
+
   // Initialize socket inside useEffect
   useEffect(() => {
-    if (!socketRef.current) {
-      socketRef.current = io(BACKEND_URL, {
-        auth: { token: 'prahari-ingest-demo-2026' },
-        autoConnect: true,
-        transports: ['websocket'],
-      });
-
-      socketRef.current.on('connect', () => console.log('Connected to Prahari Server'));
-      socketRef.current.on('connect_error', (err) => console.log('Socket Error:', err.message));
-
-      // ── Volunteer Socket.IO Fallback ─────────────────────────────────────
-      // Listen for new incidents from the backend so volunteer phones can
-      // receive SOS events even without ESP-A BLE hardware nearby.
-      socketRef.current.on('new_incident', (data) => {
-        if (isVolunteerRef.current !== true) return; // Only process in volunteer mode
-
-        const catLookup = {
-          'LANDSLIDE': { emoji: '🏔️', color: '#dc2626' },
-          'FLOOD':     { emoji: '🌊', color: '#2563eb' },
-          'EARTHQUAKE':{ emoji: '🏚️', color: '#dc2626' },
-          'CRIME':     { emoji: '🔫', color: '#ea580c' },
-          'MEDICAL':   { emoji: '🚑', color: '#dc2626' },
-          'FIRE':      { emoji: '🔥', color: '#ea580c' },
-          'MISSING':   { emoji: '🔍', color: '#ca8a04' },
-          'DISTURBANCE':{ emoji: '📢', color: '#ca8a04' },
-        };
-        const cat = data.alert_category || data.category || 'UNKNOWN';
-        const catInfo = catLookup[cat] || { emoji: '🚨', color: '#ef4444' };
-        const alertKey = `socket-${data.alert_id || Date.now()}`;
-
-        setVolunteerAlerts(prev => {
-          if (prev.some(a => a.key === alertKey)) return prev;
-
-          // Buzz/Vibrate for volunteer — same pattern as BLE detection
-          Vibration.vibrate([0, 500, 200, 500]);
-          if (Platform.OS === 'android' && PrahariLinkModule?.playNotificationSound) {
-            PrahariLinkModule.playNotificationSound().catch(e => console.log('Sound play error:', e.message));
-          }
-
-          const coords = data.coords || [];
-          const lat = coords[0] || data.lat || 0;
-          const lon = coords[1] || data.lon || 0;
-
-          return [{
-            key: alertKey,
-            nodeID: data.nodeID || data.node_id || 'UNKNOWN',
-            category: cat,
-            emoji: catInfo.emoji,
-            color: catInfo.color,
-            coords: (lat && lon) ? `${lat},${lon}` : 'N/A',
-            timestamp: new Date().toLocaleTimeString(),
-            rssi: -50, // Simulated — received via network, not BLE
-            source: 'socket',
-            citizenName: data.citizenName || '',
-            note: data.note || '',
-          }, ...prev].slice(0, 10);
-        });
-      });
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
     }
+
+    console.log('Connecting socket to:', backendUrl);
+    socketRef.current = io(backendUrl, {
+      auth: { token: 'prahari-ingest-demo-2026' },
+      autoConnect: true,
+      transports: ['websocket'],
+    });
+
+    socketRef.current.on('connect', () => {
+      console.log('Connected to Prahari Server');
+      setIsSocketConnected(true);
+    });
+    socketRef.current.on('connect_error', (err) => {
+      console.log('Socket Error:', err.message);
+      setIsSocketConnected(false);
+    });
+    socketRef.current.on('disconnect', () => {
+      console.log('Disconnected from Prahari Server');
+      setIsSocketConnected(false);
+    });
+    socketRef.current.on('incident_rejected', (err) => {
+      Alert.alert('❌ Alert Rejected', err.error || 'Server rejected the alert.');
+    });
+
+    // ── Volunteer Socket.IO Fallback ─────────────────────────────────────
+    // Listen for new incidents from the backend so volunteer phones can
+    // receive SOS events even without ESP-A BLE hardware nearby.
+    socketRef.current.on('new_incident', (data) => {
+      if (isVolunteerRef.current !== true) return; // Only process in volunteer mode
+
+      const catLookup = {
+        'LANDSLIDE': { emoji: '🏔️', color: '#dc2626' },
+        'FLOOD':     { emoji: '🌊', color: '#2563eb' },
+        'EARTHQUAKE':{ emoji: '🏚️', color: '#dc2626' },
+        'CRIME':     { emoji: '🔫', color: '#ea580c' },
+        'MEDICAL':   { emoji: '🚑', color: '#dc2626' },
+        'FIRE':      { emoji: '🔥', color: '#ea580c' },
+        'MISSING':   { emoji: '🔍', color: '#ca8a04' },
+        'DISTURBANCE':{ emoji: '📢', color: '#ca8a04' },
+      };
+      const cat = data.alert_category || data.category || 'UNKNOWN';
+      const catInfo = catLookup[cat] || { emoji: '🚨', color: '#ef4444' };
+      const alertKey = `socket-${data.alert_id || Date.now()}`;
+
+      setVolunteerAlerts(prev => {
+        if (prev.some(a => a.key === alertKey)) return prev;
+
+        // Buzz/Vibrate for volunteer — looping buzzer pattern
+        Vibration.vibrate([0, 800, 400, 800], true);
+        if (Platform.OS === 'android' && PrahariLinkModule?.playSiren) {
+          PrahariLinkModule.playSiren().catch(e => console.log('Siren play error:', e.message));
+        }
+
+        const coords = data.coords || [];
+        const lat = coords[0] || data.lat || 0;
+        const lon = coords[1] || data.lon || 0;
+
+        return [{
+          key: alertKey,
+          nodeID: data.nodeID || data.node_id || 'UNKNOWN',
+          category: cat,
+          emoji: catInfo.emoji,
+          color: catInfo.color,
+          coords: (lat && lon) ? `${lat},${lon}` : 'N/A',
+          timestamp: new Date().toLocaleTimeString(),
+          rssi: -50, // Simulated — received via network, not BLE
+          source: 'socket',
+          citizenName: data.citizenName || '',
+          note: data.note || '',
+        }, ...prev].slice(0, 10);
+      });
+    });
 
     return () => {
       if (socketRef.current) {
@@ -253,7 +282,7 @@ export default function App() {
         socketRef.current = null;
       }
     };
-  }, []);
+  }, [backendUrl]);
 
   // 15-min Cooldown Timer
   const [cooldownUntil, setCooldownUntil] = useState(null);
@@ -304,7 +333,9 @@ export default function App() {
 
   // Helper to handle going back to landing page and stopping background service
   const handleBackToLanding = () => {
+    Vibration.cancel();
     if (Platform.OS === 'android' && PrahariLinkModule) {
+      PrahariLinkModule.stopSiren().catch(() => {});
       PrahariLinkModule.stopService().then(console.log).catch(console.warn);
       PrahariLinkModule.setAlertStatus('idle');
     }
@@ -574,10 +605,10 @@ export default function App() {
                 setVolunteerAlerts(prev => {
                   if (prev.some(a => a.key === alertKey)) return prev;
                   
-                  // Buzz/Vibrate for volunteer
-                  Vibration.vibrate([0, 500, 200, 500]);
-                  if (Platform.OS === 'android' && PrahariLinkModule?.playNotificationSound) {
-                    PrahariLinkModule.playNotificationSound().catch(e => console.log('Sound play error:', e.message));
+                  // Buzz/Vibrate for volunteer — looping buzzer pattern
+                  Vibration.vibrate([0, 800, 400, 800], true);
+                  if (Platform.OS === 'android' && PrahariLinkModule?.playSiren) {
+                    PrahariLinkModule.playSiren().catch(e => console.log('Siren play error:', e.message));
                   }
                   
                   const nodeMap = { 'A': 'NODE_A', 'B': 'NODE_B', 'C': 'NODE_C', 'L': 'CMD_CTRL' };
@@ -770,8 +801,8 @@ export default function App() {
 
   // Category tap: validate required fields, then run per-alert liveness verification
   const handleCategorySelect = (cat) => {
-    if (!connected) {
-      Alert.alert('Error', 'Not connected to Village Relay Node!');
+    if (!connected && !isSocketConnected) {
+      Alert.alert('Error', 'Not connected to Village Relay Node or Backend Server!');
       return;
     }
     // Lockout disabled for demo
@@ -815,7 +846,6 @@ export default function App() {
       }
     }
     
-    // 2. Hybrid/Fallback: Send via Socket.io directly to Backend if connected to Wi-Fi/Internet
     if (isSocketConnected) {
       try {
         const socketPayload = {
@@ -848,10 +878,18 @@ export default function App() {
     }
   };
 
-  const acceptIncident = (alert) => {
+  const acceptIncident = async (alert) => {
     if (acceptedAlerts.has(alert.key)) return;
     
+    // Stop looping siren and vibration when volunteer accepts
+    Vibration.cancel();
+    if (Platform.OS === 'android' && PrahariLinkModule?.stopSiren) {
+      PrahariLinkModule.stopSiren().catch(() => {});
+    }
+    
     const volunteerName = citizenName || 'Citizen Volunteer';
+    const cleanVolName = volunteerName.replace(/\|/g, '-');
+    
     if (socketRef.current && socketRef.current.connected) {
       socketRef.current.emit('phone_ble_ack', {
         nodeID: alert.nodeID,
@@ -860,7 +898,26 @@ export default function App() {
         source: 'real',
       });
     } else {
-      console.warn('Socket not connected, cannot accept incident');
+      console.warn('Socket not connected, cannot accept incident via network');
+    }
+    
+    if (connected) {
+      try {
+        let lat = 27.6945;
+        let lon = 83.4456;
+        if (alert.coords && alert.coords !== 'N/A') {
+          const coordsParts = alert.coords.split(',');
+          lat = parseFloat(coordsParts[0]) || lat;
+          lon = parseFloat(coordsParts[1]) || lon;
+        }
+        
+        // Format payload for ESP-A to parse: VOL_ACK|lat|lon|category|note|FACE|conf|name|battery
+        const payload = `VOL_ACK|${lat}|${lon}|${alert.category || 'UNKNOWN'}|||${Math.abs(alert.rssi || 60)}|${cleanVolName}|100\n`;
+        await BluetoothSerial.write(payload);
+        console.log('Sent volunteer response to ESP-A:', payload.trim());
+      } catch (e) {
+        console.warn('Failed to send volunteer response via Bluetooth Serial:', e.message);
+      }
     }
     
     setAcceptedAlerts(prev => new Set([...prev, alert.key]));
@@ -1364,6 +1421,16 @@ export default function App() {
             <View style={[styles.statusBadge, { backgroundColor: connected ? '#3b82f6' : '#ef4444' }]}>
               <Text style={styles.statusBadgeText}>{connected ? 'LIVE' : 'INIT'}</Text>
             </View>
+            <TouchableOpacity 
+              onPress={() => {
+                setTempIpText(backendUrl);
+                setShowIpModal(true);
+              }}
+              style={[styles.statusBadge, { backgroundColor: isSocketConnected ? '#10b981' : '#ef4444', marginLeft: 6 }]}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.statusBadgeText}>{isSocketConnected ? 'SRV-LIVE' : 'SRV-OFF'}</Text>
+            </TouchableOpacity>
           </View>
         </View>
         <View style={styles.statusRow}>
@@ -1481,6 +1548,61 @@ export default function App() {
           </>
         )}
       </ScrollView>
+
+      <Modal
+        visible={showIpModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowIpModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.ipModalContent}>
+            <Text style={styles.ipModalTitle}>⚙️ SERVER CONFIGURATION</Text>
+            <Text style={styles.ipModalLabel}>Enter Backend Server URL (with port):</Text>
+            <TextInput
+              style={styles.ipTextInput}
+              value={tempIpText}
+              onChangeText={setTempIpText}
+              placeholder="e.g. http://192.168.1.100:3001"
+              placeholderTextColor="#64748b"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <View style={styles.ipModalButtons}>
+              <TouchableOpacity
+                style={[styles.ipModalButton, styles.ipCancelButton]}
+                onPress={() => setShowIpModal(false)}
+              >
+                <Text style={styles.ipButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.ipModalButton, styles.ipSaveButton]}
+                onPress={async () => {
+                  if (tempIpText.trim()) {
+                    let cleanedUrl = tempIpText.trim();
+                    if (!cleanedUrl.startsWith('http://') && !cleanedUrl.startsWith('https://')) {
+                      cleanedUrl = 'http://' + cleanedUrl;
+                    }
+                    setBackendUrl(cleanedUrl);
+                    if (Platform.OS === 'android' && PrahariLinkModule?.setConfigString) {
+                      try {
+                        await PrahariLinkModule.setConfigString('backend_url', cleanedUrl);
+                        console.log('Saved backend_url permanently:', cleanedUrl);
+                      } catch (e) {
+                        console.warn('Save config failed:', e.message);
+                      }
+                    }
+                    setShowIpModal(false);
+                    Alert.alert('Configuration Saved', `Connecting to ${cleanedUrl}...`);
+                  }
+                }}
+              >
+                <Text style={styles.ipButtonText}>Save & Connect</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <TouchableOpacity onPress={handleDeveloperReset} style={styles.footer}>
         <Text style={styles.footerText}>{t.footer}</Text>
@@ -1907,5 +2029,72 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     fontFamily: 'monospace',
+  },
+
+  // IP Settings Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(1, 31, 48, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  ipModalContent: {
+    width: '100%',
+    backgroundColor: '#002d45',
+    borderRadius: 16,
+    padding: 24,
+    borderWidth: 2,
+    borderColor: '#8abcd7',
+  },
+  ipModalTitle: {
+    color: '#8abcd7',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+    letterSpacing: 1,
+  },
+  ipModalLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  ipTextInput: {
+    backgroundColor: '#001f30',
+    borderWidth: 1,
+    borderColor: '#8abcd7',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#ffffff',
+    fontSize: 14,
+    marginBottom: 20,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  ipModalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  ipModalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ipCancelButton: {
+    backgroundColor: '#334155',
+    borderWidth: 1,
+    borderColor: '#475569',
+  },
+  ipSaveButton: {
+    backgroundColor: '#10b981',
+  },
+  ipButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
 });

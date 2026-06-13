@@ -904,7 +904,7 @@ export default function App() {
   const [showDispatchForm, setShowDispatchForm] = useState(false);
   const [pendingNodeID, setPendingNodeID] = useState(null);
   const [pendingAlertID, setPendingAlertID] = useState(null);
-  const [dispatchInfo, setDispatchInfo] = useState({ equipment: [] });
+  const [dispatchInfo, setDispatchInfo] = useState({ vehicle: 'On Foot', equipment: [] });
   const [escalationTimeLeft, setEscalationTimeLeft] = useState(ESCALATION_TIMEOUT);
   const [showNDRRMAForm, setShowNDRRMAForm] = useState(false);
   const [pendingNDRRMANodeID, setPendingNDRRMANodeID] = useState(null);
@@ -1371,7 +1371,7 @@ export default function App() {
     );
     // Store unique timer key so we clear the right timer (not a training vs real collision)
     setPendingTimerKey(inc ? `${nodeID}__${Date.parse(inc.timestamp)}` : null);
-    setDispatchInfo({ commander: '', personnel: '', equipment: [], vehicle: '', notes: '' });
+    setDispatchInfo({ commander: '', personnel: '', equipment: [], vehicle: 'On Foot', notes: '' });
     // Compute remaining time from incident trigger timestamp
     const elapsed = inc ? Math.floor((Date.now() - new Date(inc.timestamp).getTime()) / 1000) : 0;
     setEscalationTimeLeft(Math.max(0, ESCALATION_TIMEOUT - elapsed));
@@ -2224,7 +2224,17 @@ export default function App() {
                   </div>
                   <div>
                     <label className="text-[10px] uppercase font-bold text-gray-500 mb-1 block tracking-wider">{t.vehicle}</label>
-                    <input className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-blue-500 outline-none" value={dispatchInfo.vehicle || ''} onChange={e => setDispatchInfo({ ...dispatchInfo, vehicle: e.target.value })} placeholder="e.g. Bolero" />
+                    <select
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-blue-500 outline-none cursor-pointer"
+                      value={dispatchInfo.vehicle || 'On Foot'}
+                      onChange={e => setDispatchInfo({ ...dispatchInfo, vehicle: e.target.value })}
+                    >
+                      <option value="On Foot">🚶 On Foot / पैदल</option>
+                      <option value="Jeep">🚓 Jeep / जिप</option>
+                      <option value="Motorcycle">🏍️ Motorcycle / मोटरसाइकल</option>
+                      <option value="Truck">🚒 Truck / ट्रक</option>
+                      <option value="Ambulance">🚑 Ambulance / एम्बुलेन्स</option>
+                    </select>
                   </div>
                 </div>
                 <div>

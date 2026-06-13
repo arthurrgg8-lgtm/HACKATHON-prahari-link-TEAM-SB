@@ -3,13 +3,16 @@ package com.anonymous.praharilinkmobile;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.speech.tts.TextToSpeech;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
+import java.util.Locale;
 
 public class PrahariLinkModule extends ReactContextBaseJavaModule {
     private final ReactApplicationContext reactContext;
+    private TextToSpeech textToSpeech;
 
     public PrahariLinkModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -69,5 +72,73 @@ public class PrahariLinkModule extends ReactContextBaseJavaModule {
         } catch (Exception e) {
             promise.reject("Error", e.getMessage());
         }
+    }
+
+    @ReactMethod
+    public void setCooldown(double cooldownUntil, Promise promise) {
+        try {
+            SharedPreferences sharedPref = reactContext.getSharedPreferences("PrahariLinkPrefs", Context.MODE_PRIVATE);
+            SharedPreferences.Editor editor = sharedPref.edit();
+            editor.putLong("cooldown_until", (long) cooldownUntil);
+            editor.apply();
+            promise.resolve("Cooldown set to: " + cooldownUntil);
+        } catch (Exception e) {
+            promise.reject("Error", e.getMessage());
+        }
+    }
+
+    @ReactMethod
+    public void getCooldown(Promise promise) {
+        try {
+            SharedPreferences sharedPref = reactContext.getSharedPreferences("PrahariLinkPrefs", Context.MODE_PRIVATE);
+            long cooldownUntil = sharedPref.getLong("cooldown_until", 0L);
+            promise.resolve((double) cooldownUntil);
+        } catch (Exception e) {
+            promise.reject("Error", e.getMessage());
+        }
+    }
+
+    @ReactMethod
+    public void speakNepali(String message, Promise promise) {
+        if (message == null || message.trim().isEmpty()) {
+            promise.reject("TTS_ERROR", "Speech message is empty");
+            return;
+        }
+        if (textToSpeech != null) {
+            speakWithEngine(message, promise);
+            return;
+        }
+        textToSpeech = new TextToSpeech(reactContext, status -> {
+            if (status != TextToSpeech.SUCCESS) {
+                textToSpeech = null;
+                promise.reject("TTS_ERROR", "Unable to initialize speech");
+                return;
+            }
+            speakWithEngine(message, promise);
+        });
+    }
+
+    private void speakWithEngine(String message, Promise promise) {
+        Locale nepali = new Locale("ne", "NP");
+        int languageStatus = textToSpeech.setLanguage(nepali);
+        if (languageStatus == TextToSpeech.LANG_MISSING_DATA
+                || languageStatus == TextToSpeech.LANG_NOT_SUPPORTED) {
+            promise.reject("TTS_UNAVAILABLE", "Nepali speech is not installed on this device");
+            return;
+        }
+        textToSpeech.setSpeechRate(0.88f);
+        textToSpeech.setPitch(1.0f);
+        textToSpeech.speak(message, TextToSpeech.QUEUE_FLUSH, null, "prahari_reassurance");
+        promise.resolve("Speaking reassurance");
+    }
+
+    @Override
+    public void invalidate() {
+        if (textToSpeech != null) {
+            textToSpeech.stop();
+            textToSpeech.shutdown();
+            textToSpeech = null;
+        }
+        super.invalidate();
     }
 }

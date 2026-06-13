@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, TextInput, Alert, SafeAreaView, PermissionsAndroid, Platform, ScrollView, NativeModules } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, TextInput, Alert, SafeAreaView, PermissionsAndroid, Platform, ScrollView, NativeModules, AppState, InteractionManager, Image } from 'react-native';
 import BluetoothSerial from 'react-native-bluetooth-serial-next';
 import * as Location from 'expo-location';
 import * as Battery from 'expo-battery';
@@ -33,6 +33,9 @@ const TRANSLATIONS = {
     searching: 'Searching for Relay...', notePlaceholder: 'Describe the emergency... (e.g. Fire near school) *',
     helpComing: 'HELP IS ON THE WAY!', ackSub: 'Police have acknowledged your alert',
     ackFoot: 'Stay where you are. Assistance arriving ASAP.',
+    reassurance: 'You are not alone. Move to a safe place, breathe slowly, and stay available for police contact.',
+    reassuranceNepali: 'तपाईं एक्लै हुनुहुन्न। सुरक्षित स्थानमा बस्नुहोस्, बिस्तारै सास लिनुहोस् र प्रहरीको सम्पर्कको लागि तयार रहनुहोस्।',
+    playReassurance: 'PLAY NEPALI REASSURANCE',
     sending: 'Sending Emergency Alert', cancel: 'CANCEL', selectCategory: 'Select Incident Type',
     namePlaceholder: 'Your Name (so police know who reported) *',
     footer: 'Nepal Police Hackathon 2026 - Prahari-Link', ok: 'OK ✅',
@@ -67,6 +70,9 @@ const TRANSLATIONS = {
     searching: 'रिले खोज्दै...', notePlaceholder: 'आपतकालिन वर्णन गर्नुहोस्... (जस्तै: विद्यालयमा आगो) *',
     helpComing: 'सहायता आउँदैछ!', ackSub: 'प्रहरीले तपाईंको सूचना स्वीकार गरेको छ',
     ackFoot: 'कृपया पर्खनुहोस्। सहायता चाँडै आइपुग्नेछ।',
+    reassurance: 'तपाईं एक्लै हुनुहुन्न। सुरक्षित स्थानमा बस्नुहोस्, बिस्तारै सास लिनुहोस् र प्रहरीको सम्पर्कको लागि तयार रहनुहोस्।',
+    reassuranceNepali: 'You are not alone. Move to a safe place, breathe slowly, and stay available for police contact.',
+    playReassurance: 'नेपाली सन्देश सुन्नुहोस्',
     sending: 'आपतकालिन सूचना पठाउँदै', cancel: 'रद्द गर्नुहोस्',
     selectCategory: 'घटना प्रकार चयन गर्नुहोस्',
     namePlaceholder: 'तपाईंको नाम (प्रहरीलाई जानकारीको लागि) *',
@@ -99,6 +105,25 @@ const TRANSLATIONS = {
   },
 };
 
+function PoliceBrand({ lang, title, compact = false }) {
+  return (
+    <View style={styles.policeBrand}>
+      <View style={[styles.brandMark, compact && styles.brandMarkCompact]}>
+        <Text style={[styles.brandMarkText, compact && styles.brandMarkTextCompact]}>NP</Text>
+      </View>
+      <View>
+        <Text style={[styles.policeBrandBanner, compact && styles.policeBrandBannerCompact]}>
+          {lang === 'en' ? 'NEPAL POLICE' : 'नेपाल प्रहरी'}
+        </Text>
+        <Text style={[styles.policeBrandNepali, compact && styles.policeBrandNepaliCompact]}>
+          {lang === 'en' ? 'नेपाल प्रहरी' : 'NEPAL POLICE'}
+        </Text>
+        {title ? <Text style={[styles.title, compact && styles.titleCompact]}>{title}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
 export default function App() {
   const [connected, setConnected] = useState(false);
   const [location, setLocation] = useState(null);
@@ -114,6 +139,8 @@ export default function App() {
   const [lang, setLang] = useState('en');
   const [deviceBattery, setDeviceBattery] = useState(null);
   const countdownRef = useRef(null);
+  const sosSendTimeoutRef = useRef(null);
+  const reassurancePlayedRef = useRef(false);
   const batterySubRef = useRef(null);
   const bleScanRef = useRef(null);
   // Face verification state — verify identity before SOS
@@ -127,8 +154,54 @@ export default function App() {
   const [sosStatus, setSosStatus] = useState('idle'); // idle | waiting | acknowledged | resolved
   const [isLocked, setIsLocked] = useState(false);
   const [developerTapCount, setDeveloperTapCount] = useState(0);
+  const [showValidationErrors, setShowValidationErrors] = useState(false);
+  
+  // 15-minute cooldown state
+  const [cooldownUntil, setCooldownUntil] = useState(null);
+  const [cooldownRemaining, setCooldownRemaining] = useState(null);
+  const cooldownTimerRef = useRef(null);
 
   const t = TRANSLATIONS[lang];
+  const NEPALI_REASSURANCE = 'तपाईं सुरक्षित स्थानमा बस्नुहोस्। बिस्तारै सास लिनुहोस्। नेपाल प्रहरीलाई तपाईंको सूचना प्राप्त भएको छ। सहायता तपाईं तर्फ आउँदैछ।';
+
+  // ── 15-min Cooldown Timer ───────────────────────────────────────────────
+  const startCooldownTimer = (until) => {
+    if (cooldownTimerRef.current) {
+      clearInterval(cooldownTimerRef.current);
+      cooldownTimerRef.current = null;
+    }
+    cooldownTimerRef.current = setInterval(() => {
+      const remaining = Math.max(0, Math.floor((until - Date.now()) / 1000));
+      setCooldownRemaining(remaining);
+      if (remaining <= 0) {
+        if (cooldownTimerRef.current) {
+          clearInterval(cooldownTimerRef.current);
+          cooldownTimerRef.current = null;
+        }
+        setIsLocked(false);
+        setCooldownUntil(null);
+        setCooldownRemaining(null);
+        if (Platform.OS === 'android' && PrahariLinkModule) {
+          PrahariLinkModule.setCooldown(0);
+        }
+      }
+    }, 1000);
+  };
+
+  const speakReassurance = () => {
+    if (Platform.OS !== 'android' || !PrahariLinkModule?.speakNepali) return;
+    PrahariLinkModule.speakNepali(NEPALI_REASSURANCE).catch(error => {
+      console.warn('Nepali speech unavailable:', error);
+    });
+  };
+
+  useEffect(() => {
+    if (sosStatus === 'acknowledged' && ackReceived && !reassurancePlayedRef.current) {
+      reassurancePlayedRef.current = true;
+      speakReassurance();
+    }
+    if (sosStatus === 'idle') reassurancePlayedRef.current = false;
+  }, [sosStatus, ackReceived]);
 
   // Helper to handle going back to landing page and stopping background service
   const handleBackToLanding = () => {
@@ -175,29 +248,54 @@ export default function App() {
       setSosStatus('idle');
       setAckReceived(false);
       setAckDispatchInfo(null);
+      setCooldownUntil(null);
+      setCooldownRemaining(null);
+      if (cooldownTimerRef.current) {
+        clearInterval(cooldownTimerRef.current);
+        cooldownTimerRef.current = null;
+      }
       if (Platform.OS === 'android' && PrahariLinkModule) {
         PrahariLinkModule.setAlertStatus('idle');
+        PrahariLinkModule.setCooldown(0);
       }
-      Alert.alert('Developer Mode', 'All-Clear: Alert lock and session status reset!');
+      Alert.alert('Developer Mode', 'All-Clear: Alert lock, cooldown, and session status reset!');
     }
   };
 
+  const waitForActivity = async () => {
+    if (AppState.currentState !== 'active') {
+      await new Promise(resolve => {
+        const subscription = AppState.addEventListener('change', state => {
+          if (state === 'active') {
+            subscription.remove();
+            resolve();
+          }
+        });
+      });
+    }
+    await new Promise(resolve => InteractionManager.runAfterInteractions(resolve));
+  };
+
   const requestPermissions = async () => {
-    if (Platform.OS === 'android') {
-      try {
-        const perms = [
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          PermissionsAndroid.PERMISSIONS.ACCESS_BACKGROUND_LOCATION,
+    if (Platform.OS !== 'android') return;
+    try {
+      await waitForActivity();
+      const perms = [
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        PermissionsAndroid.PERMISSIONS.CAMERA,
+      ];
+      if (Platform.Version >= 31) {
+        perms.push(
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
-          PermissionsAndroid.PERMISSIONS.CAMERA,
-        ];
-        if (Platform.Version >= 33) {
-          perms.push(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
-        }
-        await PermissionsAndroid.requestMultiple(perms);
-      } catch (err) { console.warn(err); }
+        );
+      }
+      if (Platform.Version >= 33) {
+        perms.push(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+      }
+      await PermissionsAndroid.requestMultiple(perms.filter(Boolean));
+    } catch (err) {
+      console.warn('Permission request failed:', err);
     }
   };
 
@@ -207,6 +305,7 @@ export default function App() {
   const [btErrorMessage, setBtErrorMessage] = useState('');
   const btRetryCountRef = useRef(0);
   const btRetryTimerRef = useRef(null);
+  const btHealthTimerRef = useRef(null);
 
   // Helper: find a device by name (exact then partial)
   const findRelay = (devices) => {
@@ -320,13 +419,15 @@ export default function App() {
             btRetryTimerRef.current = setTimeout(() => scanForRelay(), 3000);
           } else {
             setBtStatus('failed');
-            setBtErrorMessage('Connection failed after 3 attempts. Make sure ESP-A is on and in range.');
+            setBtErrorMessage('Relay unavailable. Foreground reconnection remains active.');
             btRetryCountRef.current = 0;
+            btRetryTimerRef.current = setTimeout(() => scanForRelay(), 10000);
           }
         }
       } else {
         setBtStatus('failed');
-        setBtErrorMessage('Prahari-Link-V1 not found. Make sure ESP-A is powered on and within range, or tap "Scan for Node" to retry.');
+        setBtErrorMessage('Relay not found. Foreground reconnection will retry automatically.');
+        btRetryTimerRef.current = setTimeout(() => scanForRelay(), 10000);
         console.log('Relay not found. Bonded:', devices.map(d => d.name), 'Searched for: Prahari-Link-V1');
       }
     } catch (err) {
@@ -417,6 +518,17 @@ export default function App() {
         
         // Load persistent alert/incident status from Native SharedPreferences
         if (Platform.OS === 'android' && PrahariLinkModule) {
+          // Also load 15-min cooldown
+          PrahariLinkModule.getCooldown().then(cooldownTs => {
+            const now = Date.now();
+            if (cooldownTs && cooldownTs > now) {
+              setCooldownUntil(cooldownTs);
+              setIsLocked(true);
+              startCooldownTimer(cooldownTs);
+              setCooldownRemaining(Math.floor((cooldownTs - now) / 1000));
+            }
+          }).catch(() => {});
+
           PrahariLinkModule.getAlertStatus().then(status => {
             if (status) {
               console.log('Loaded persistent status:', status);
@@ -454,12 +566,24 @@ export default function App() {
         setTimeout(async () => {
           await scanForRelay();
         }, 2000);
+        btHealthTimerRef.current = setInterval(async () => {
+          try {
+            const active = await BluetoothSerial.isConnected();
+            if (!active && !btRetryTimerRef.current) await scanForRelay();
+          } catch (error) {
+            console.log('Bluetooth health check failed:', error);
+          }
+        }, 15000);
       } catch (e) { console.log('Init error:', e); }
     };
     init();
     return () => {
       if (batterySubRef.current) batterySubRef.current.remove();
       if (btRetryTimerRef.current) clearTimeout(btRetryTimerRef.current);
+      if (btHealthTimerRef.current) clearInterval(btHealthTimerRef.current);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      if (sosSendTimeoutRef.current) clearTimeout(sosSendTimeoutRef.current);
+      if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
       stopBLEScan();
       if (bleManager) bleManager.destroy();
     };
@@ -475,6 +599,21 @@ export default function App() {
     return () => stopBLEScan();
   }, [isVolunteer]);
 
+  const scheduleSOS = (category, confidence) => {
+    clearInterval(countdownRef.current);
+    clearTimeout(sosSendTimeoutRef.current);
+    setSelectedCategory(category);
+    setCountdown(3);
+    countdownRef.current = setInterval(() => {
+      setCountdown(prev => prev > 1 ? prev - 1 : 1);
+    }, 1000);
+    sosSendTimeoutRef.current = setTimeout(() => {
+      clearInterval(countdownRef.current);
+      setCountdown(null);
+      fireSOS(category, confidence);
+    }, 3000);
+  };
+
   // Called by LivenessCamera when face is verified
   const handleFaceVerified = (category, confidence) => {
     setShowLiveness(false);
@@ -484,19 +623,8 @@ export default function App() {
       setFaceVerified(true);
       return;
     }
-    
-    setSelectedCategory(category);
-    setCountdown(3);
-    countdownRef.current = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(countdownRef.current);
-          return null;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    fireSOS(category, confidence);
+
+    scheduleSOS(category, confidence);
   };
 
   const handleLivenessFailed = (reason) => {
@@ -507,11 +635,14 @@ export default function App() {
 
   const cancelCountdown = () => {
     clearInterval(countdownRef.current);
+    clearTimeout(sosSendTimeoutRef.current);
+    countdownRef.current = null;
+    sosSendTimeoutRef.current = null;
     setCountdown(null);
     setSelectedCategory(null);
   };
 
-  // Category tap: validate Name and Description first, then liveness lanch or send
+  // Category tap: validate required fields, then run per-alert liveness verification
   const handleCategorySelect = (cat) => {
     if (!connected) {
       Alert.alert('Error', 'Not connected to Village Relay Node!');
@@ -522,21 +653,13 @@ export default function App() {
       return;
     }
     if (citizenName.trim() === '' || userNote.trim() === '') {
+      setShowValidationErrors(true);
       Alert.alert(t.requiredFields, t.requiredDesc);
       return;
     }
-    setSelectedCategory(cat);
-    setCountdown(3);
-    countdownRef.current = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(countdownRef.current);
-          return null;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    fireSOS(cat, 95);
+    setShowValidationErrors(false);
+    setLivenessCategory(cat);
+    setShowLiveness(true);
   };
 
   const fireSOS = async (category, confidence = 50) => {
@@ -564,8 +687,15 @@ export default function App() {
       // Update app status to waiting in SharedPreferences and React state
       setSosStatus('waiting');
       setIsLocked(true);
+      
+      // Start 15-minute cooldown ban
+      const cooldownTime = Date.now() + 15 * 60 * 1000;
+      setCooldownUntil(cooldownTime);
+      setCooldownRemaining(15 * 60);
+      startCooldownTimer(cooldownTime);
       if (Platform.OS === 'android' && PrahariLinkModule) {
         PrahariLinkModule.setAlertStatus('waiting');
+        PrahariLinkModule.setCooldown(cooldownTime);
       }
     } catch (e) {
       Alert.alert('Fail', 'Communication error with Node.');
@@ -577,14 +707,21 @@ export default function App() {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: '#011f30' }]}>
         <View style={styles.landingContainer}>
-          {/* Official Emblem Banner */}
-          <View style={styles.landingEmblemContainer}>
-            <View style={styles.landingCrestBorder}>
-              <Text style={{ fontSize: 52 }}>👮‍♂️</Text>
+          <View style={styles.officialHeader}>
+            <View style={styles.nepalFlagBar} />
+            <View style={styles.officialHeaderContent}>
+              <Image source={require('./assets/nepal-police-logo.png')} style={styles.landingLogo} resizeMode="contain" />
+              <View style={styles.officialHeaderCopy}>
+                <Text style={styles.officialNepali}>नेपाल प्रहरी</Text>
+                <Text style={styles.officialEnglish}>NEPAL POLICE</Text>
+                <Text style={styles.officialMotto}>सत्य सेवा सुरक्षणम्</Text>
+              </View>
             </View>
-            <View style={styles.landingRadioWaves}>
-              <Text style={{ fontSize: 18, color: '#8abcd7', fontWeight: 'bold' }}>📡 MESH ACTIVE</Text>
-            </View>
+          </View>
+
+          <View style={styles.landingRadioWaves}>
+            <View style={styles.meshDot} />
+            <Text style={styles.meshText}>OFFLINE MESH NETWORK  •  READY</Text>
           </View>
           
           <Text style={styles.landingTitle}>
@@ -607,10 +744,11 @@ export default function App() {
               onPress={enterVolunteerMode}
               activeOpacity={0.8}
             >
-              <Text style={styles.landingBtnEmoji}>🤝</Text>
+              <Text style={styles.landingBtnEyebrow}>{lang === 'en' ? 'COMMUNITY' : 'समुदाय'}</Text>
               <Text style={styles.landingBtnText}>
-                {lang === 'en' ? 'Volunteer Mode' : 'स्वयंसेवक मोड'}
+                {lang === 'en' ? 'Volunteer' : 'स्वयंसेवक'}
               </Text>
+              <Text style={styles.landingBtnArrow}>→</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -618,10 +756,11 @@ export default function App() {
               onPress={enterResponderMode}
               activeOpacity={0.8}
             >
-              <Text style={styles.landingBtnEmoji}>🚨</Text>
+              <Text style={styles.landingBtnEyebrow}>{lang === 'en' ? 'AUTHORIZED' : 'अधिकृत'}</Text>
               <Text style={styles.landingBtnText}>
-                {lang === 'en' ? 'Responder Mode' : 'उत्तरदाता मोड'}
+                {lang === 'en' ? 'Responder' : 'उत्तरदाता'}
               </Text>
+              <Text style={styles.landingBtnArrow}>→</Text>
             </TouchableOpacity>
           </View>
 
@@ -655,9 +794,11 @@ export default function App() {
               <TouchableOpacity onPress={handleBackToLanding} style={styles.backButton}>
                 <Text style={{ color: '#8abcd7', fontSize: 22, fontWeight: '900' }}>←</Text>
               </TouchableOpacity>
-              <Text style={styles.title}>
-                {lang === 'en' ? TRANSLATIONS.en.volunteerMode : TRANSLATIONS.ne.volunteerMode}
-              </Text>
+              <PoliceBrand
+                lang={lang}
+                title={lang === 'en' ? TRANSLATIONS.en.volunteerMode : TRANSLATIONS.ne.volunteerMode}
+                compact
+              />
             </View>
             <View style={styles.headerRight}>
               {deviceBattery !== null && (
@@ -788,22 +929,6 @@ export default function App() {
     );
   }
 
-  // ── Initial Face Verification (before main screen) ───────────────────────
-  if (isVolunteer === false && !faceVerified) {
-    return (
-      <LivenessCamera
-        category={null}
-        onVerified={(_, confidence) => handleFaceVerified(null, confidence)}
-        onFailed={(reason) => {
-          Alert.alert('🔒 Verification Failed', reason || 'Access denied. Only verified responders can send alerts.');
-          handleBackToLanding();
-        }}
-        onCancel={handleBackToLanding}
-        lang={lang}
-      />
-    );
-  }
-
   // ── SOS Waiting Lobby Screen (Requirement 7) ──────────────────────────────
   if (sosStatus === 'waiting') {
     return (
@@ -813,7 +938,7 @@ export default function App() {
             <TouchableOpacity onPress={handleBackToLanding} style={styles.backButton}>
               <Text style={{ color: '#8abcd7', fontSize: 22, fontWeight: '900' }}>←</Text>
             </TouchableOpacity>
-            <Text style={styles.title}>{t.title}</Text>
+            <PoliceBrand lang={lang} title={t.title} compact />
             <View style={styles.headerRight}>
               <View style={[styles.statusBadge, { backgroundColor: '#eab308' }]}>
                 <Text style={styles.statusBadgeText}>WAITING</Text>
@@ -856,8 +981,11 @@ export default function App() {
             <TouchableOpacity onPress={handleBackToLanding} style={styles.backButton}>
               <Text style={{ color: '#8abcd7', fontSize: 22, fontWeight: '900' }}>←</Text>
             </TouchableOpacity>
-            <Text style={styles.title}>{t.title}</Text>
+            <PoliceBrand lang={lang} title={t.title} compact />
             <View style={styles.headerRight}>
+              <TouchableOpacity onPress={() => setLang(lang === 'en' ? 'ne' : 'en')} style={styles.langToggle}>
+                <Text style={styles.langText}>{lang === 'en' ? 'ने' : 'EN'}</Text>
+              </TouchableOpacity>
               <View style={[styles.statusBadge, { backgroundColor: '#10b981' }]}>
                 <Text style={styles.statusBadgeText}>ACTIVE ACK</Text>
               </View>
@@ -899,6 +1027,13 @@ export default function App() {
           )}
 
           <Text style={styles.ackFoot}>{t.ackFoot}</Text>
+          <View style={styles.reassuranceCard}>
+            <Text style={styles.reassurancePrimary}>{t.reassurance}</Text>
+            <Text style={styles.reassuranceSecondary}>{t.reassuranceNepali}</Text>
+            <TouchableOpacity style={styles.speechButton} onPress={speakReassurance}>
+              <Text style={styles.speechButtonText}>▶ {t.playReassurance}</Text>
+            </TouchableOpacity>
+          </View>
 
           <TouchableOpacity style={styles.ackHomeButton} onPress={handleBackToLanding}>
             <Text style={styles.ackHomeButtonText}>
@@ -923,7 +1058,7 @@ export default function App() {
             <TouchableOpacity onPress={handleBackToLanding} style={styles.backButton}>
               <Text style={{ color: '#8abcd7', fontSize: 22, fontWeight: '900' }}>←</Text>
             </TouchableOpacity>
-            <Text style={styles.title}>{t.title}</Text>
+            <PoliceBrand lang={lang} title={t.title} compact />
             <View style={styles.headerRight}>
               <View style={[styles.statusBadge, { backgroundColor: '#10b981' }]}>
                 <Text style={styles.statusBadgeText}>RESOLVED</Text>
@@ -991,7 +1126,7 @@ export default function App() {
             <TouchableOpacity onPress={handleBackToLanding} style={styles.backButton}>
               <Text style={{ color: '#8abcd7', fontSize: 22, fontWeight: '900' }}>←</Text>
             </TouchableOpacity>
-            <Text style={styles.title}>{t.title}</Text>
+            <PoliceBrand lang={lang} title={t.title} compact />
           </View>
           <View style={styles.headerRight}>
             {deviceBattery !== null && (
@@ -1059,6 +1194,16 @@ export default function App() {
             <Text style={{ fontSize: 64, marginBottom: 16 }}>🔒</Text>
             <Text style={styles.lockoutTitle}>{t.lockedLabel}</Text>
             <Text style={styles.lockoutDesc}>{t.lockedDesc}</Text>
+            {cooldownRemaining !== null && cooldownRemaining > 0 && (
+              <View style={styles.cooldownTimerRow}>
+                <Text style={styles.cooldownTimerIcon}>⏱</Text>
+                <Text style={styles.cooldownTimerText}>
+                  {lang === 'en'
+                    ? `${Math.floor(cooldownRemaining / 60)}:${String(cooldownRemaining % 60).padStart(2, '0')} until next trigger`
+                    : `अर्को ट्रिगरको लागि ${Math.floor(cooldownRemaining / 60)}:${String(cooldownRemaining % 60).padStart(2, '0')} पर्खनुहोस्`}
+                </Text>
+              </View>
+            )}
             <View style={styles.lockoutBadge}>
               <Text style={styles.lockoutBadgeText}>LOCKED</Text>
             </View>
@@ -1070,24 +1215,36 @@ export default function App() {
 
             <View style={styles.noteContainer}>
               <TextInput
-                style={styles.nameInput}
+                style={[styles.nameInput, showValidationErrors && !citizenName.trim() && styles.inputError]}
                 placeholder={t.namePlaceholder}
                 placeholderTextColor="#64748b"
                 maxLength={30}
                 value={citizenName}
-                onChangeText={setCitizenName}
+                onChangeText={(value) => {
+                  setCitizenName(value);
+                  if (value.trim() && userNote.trim()) setShowValidationErrors(false);
+                }}
               />
+              {showValidationErrors && !citizenName.trim() && (
+                <Text style={styles.validationText}>{lang === 'en' ? 'Name is required' : 'नाम अनिवार्य छ'}</Text>
+              )}
             </View>
 
             <View style={styles.noteContainer}>
               <TextInput
-                style={styles.noteInput}
+                style={[styles.noteInput, showValidationErrors && !userNote.trim() && styles.inputError]}
                 placeholder={t.notePlaceholder}
                 placeholderTextColor="#64748b"
                 multiline maxLength={99}
                 value={userNote}
-                onChangeText={setUserNote}
+                onChangeText={(value) => {
+                  setUserNote(value);
+                  if (value.trim() && citizenName.trim()) setShowValidationErrors(false);
+                }}
               />
+              {showValidationErrors && !userNote.trim() && (
+                <Text style={styles.validationText}>{lang === 'en' ? 'Emergency description is required' : 'आपतकालीन विवरण अनिवार्य छ'}</Text>
+              )}
               <Text style={styles.noteCounter}>{userNote.length}/99</Text>
             </View>
 
@@ -1117,10 +1274,20 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#011f30' },
-  header: { padding: 16, paddingTop: 40, borderBottomWidth: 1, borderBottomColor: '#002d45' },
+  header: { padding: 16, paddingTop: 40, backgroundColor: '#004163', borderTopWidth: 4, borderTopColor: '#cb2027', borderBottomWidth: 1, borderBottomColor: '#8abcd7' },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   headerRight: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  policeBrand: { flexDirection: 'row', alignItems: 'center' },
+  brandMark: { width: 42, height: 48, borderRadius: 8, backgroundColor: '#cb2027', borderWidth: 2, borderColor: '#ffffff', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  brandMarkCompact: { width: 30, height: 34, borderRadius: 6, marginRight: 8 },
+  brandMarkText: { color: 'white', fontSize: 16, fontWeight: '900', letterSpacing: 1 },
+  brandMarkTextCompact: { fontSize: 11 },
+  policeBrandBanner: { color: '#ffffff', fontSize: 12, fontWeight: '900', letterSpacing: 1.4 },
+  policeBrandBannerCompact: { fontSize: 9, letterSpacing: 0.8 },
+  policeBrandNepali: { color: '#8abcd7', fontSize: 12, fontWeight: '800', marginTop: 1 },
+  policeBrandNepaliCompact: { fontSize: 9 },
   title: { fontSize: 24, fontWeight: '900', color: 'white' },
+  titleCompact: { fontSize: 20 },
   langToggle: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: '#002d45', borderWidth: 1, borderColor: '#8abcd7' },
   langText: { color: '#8abcd7', fontSize: 12, fontWeight: '700' },
   statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
@@ -1141,6 +1308,8 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#8abcd7',
   },
   noteCounter: { textAlign: 'right', color: '#64748b', fontSize: 10, marginTop: 3 },
+  inputError: { borderColor: '#cb2027', borderWidth: 2 },
+  validationText: { color: '#f87171', fontSize: 10, fontWeight: '700', marginTop: 4 },
   catGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' },
   catItem: {
     width: '47%', padding: 18, borderRadius: 16, borderWidth: 1.5,
@@ -1183,7 +1352,18 @@ const styles = StyleSheet.create({
   ackSub: { fontSize: 13, color: '#8abcd7', marginTop: 8, textAlign: 'center' },
   ackBadge: { backgroundColor: '#002d45', borderWidth: 1, borderColor: '#8abcd7', paddingHorizontal: 20, paddingVertical: 6, borderRadius: 20, marginTop: 16 },
   ackBadgeText: { color: 'white', fontSize: 14, fontWeight: '700', letterSpacing: 2 },
-  ackFoot: { fontSize: 12, color: '#64748b', marginTop: 30, textAlign: 'center' },
+  ackFoot: { fontSize: 12, color: '#64748b', marginTop: 24, textAlign: 'center' },
+  reassuranceCard: {
+    width: '100%', backgroundColor: 'rgba(0,65,99,0.72)', borderWidth: 1,
+    borderColor: '#d4af37', borderRadius: 12, padding: 14, marginTop: 16,
+  },
+  reassurancePrimary: { color: 'white', fontSize: 13, fontWeight: '800', lineHeight: 20, textAlign: 'center' },
+  reassuranceSecondary: { color: '#8abcd7', fontSize: 11, lineHeight: 18, textAlign: 'center', marginTop: 7 },
+  speechButton: {
+    alignSelf: 'center', backgroundColor: '#d4af37', borderRadius: 8,
+    paddingHorizontal: 14, paddingVertical: 9, marginTop: 12,
+  },
+  speechButtonText: { color: '#102030', fontSize: 10, fontWeight: '900', letterSpacing: 0.4 },
 
   // Enhanced ACK dispatch details
   ackDispatchDetails: {
@@ -1223,34 +1403,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 30,
   },
-  landingEmblemContainer: {
-    alignItems: 'center',
-    marginBottom: 30,
-  },
-  landingCrestBorder: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    borderWidth: 4,
-    borderColor: '#8abcd7',
-    backgroundColor: '#002d45',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  landingRadioWaves: {
-    marginTop: 12,
-    backgroundColor: 'rgba(138, 205, 215, 0.12)',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(138, 205, 215, 0.25)',
-  },
+  officialHeader: { width: '100%', backgroundColor: '#004163', borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: '#8abcd7', marginBottom: 16, elevation: 8 },
+  nepalFlagBar: { height: 7, backgroundColor: '#cb2027' },
+  officialHeaderContent: { flexDirection: 'row', alignItems: 'center', padding: 18 },
+  officialHeaderCopy: { flex: 1, marginLeft: 18 },
+  officialNepali: { color: '#ffffff', fontSize: 25, fontWeight: '900' },
+  officialEnglish: { color: '#8abcd7', fontSize: 13, fontWeight: '900', letterSpacing: 2, marginTop: 2 },
+  officialMotto: { color: '#ffffff', fontSize: 11, marginTop: 7, opacity: 0.8 },
+  landingLogo: { width: 98, height: 92 },
+  crestInner: { width: 62, height: 70, borderRadius: 12, borderWidth: 1, borderColor: '#8abcd7', justifyContent: 'center', alignItems: 'center' },
+  crestNP: { color: '#ffffff', fontSize: 22, fontWeight: '900', letterSpacing: 2 },
+  crestDivider: { width: 34, height: 1, backgroundColor: '#8abcd7', marginVertical: 4 },
+  crestNepali: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
+  landingRadioWaves: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(138, 205, 215, 0.12)', paddingHorizontal: 13, paddingVertical: 7, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(138, 205, 215, 0.35)', marginBottom: 22 },
+  meshDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#22c55e', marginRight: 8 },
+  meshText: { color: '#8abcd7', fontSize: 9, fontWeight: '900', letterSpacing: 1 },
   landingTitle: {
     fontSize: 28,
     fontWeight: '900',
@@ -1278,7 +1445,7 @@ const styles = StyleSheet.create({
   landingButtonsRow: {
     flexDirection: 'row',
     gap: 15,
-    marginTop: 40,
+    marginTop: 28,
     width: '100%',
     justifyContent: 'center',
   },
@@ -1295,8 +1462,9 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 6,
   },
-  landingBtnEmoji: { fontSize: 28, marginBottom: 8 },
-  landingBtnText: { color: 'white', fontSize: 13, fontWeight: '800', textAlign: 'center' },
+  landingBtnEyebrow: { color: 'rgba(255,255,255,0.75)', fontSize: 9, fontWeight: '900', letterSpacing: 1.5, marginBottom: 7 },
+  landingBtnText: { color: 'white', fontSize: 17, fontWeight: '900', textAlign: 'center' },
+  landingBtnArrow: { color: 'white', fontSize: 21, fontWeight: '500', marginTop: 7 },
 
   // Back Button Styles (Requirement 8)
   backButton: {
@@ -1503,5 +1671,24 @@ const styles = StyleSheet.create({
     color: '#64748b',
     textAlign: 'center',
     marginTop: 8,
+  },
+  cooldownTimerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(234,179,8,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(234,179,8,0.3)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  cooldownTimerIcon: { fontSize: 18, marginRight: 8 },
+  cooldownTimerText: {
+    color: '#eab308',
+    fontSize: 14,
+    fontWeight: '800',
+    fontFamily: 'monospace',
   },
 });

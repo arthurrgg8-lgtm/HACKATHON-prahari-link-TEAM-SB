@@ -7,11 +7,14 @@ export default function LivenessCamera({ category, onVerified, onFailed, onCance
   const [status, setStatus] = useState('initializing');
   const [message, setMessage] = useState('');
   const [retryCount, setRetryCount] = useState(0);
+  const [cameraReady, setCameraReady] = useState(false);
+  const retryCountRef = useRef(0);
   const camera = useRef(null);
   const device = useCameraDevice('front');
   const { hasPermission, requestPermission } = useCameraPermission();
   const isMounted = useRef(true);
   const retryTimer = useRef(null);
+  const captureInProgress = useRef(false);
 
   const t = language === 'ne' ? nepal : english;
 
@@ -33,86 +36,82 @@ export default function LivenessCamera({ category, onVerified, onFailed, onCance
       }
       setStatus('ready');
       setMessage(t.showFace);
-      retryTimer.current = setTimeout(() => captureAndDetect(), 1500);
     };
     init();
   }, [hasPermission]);
 
+  useEffect(() => {
+    if (!cameraReady || !hasPermission || status !== 'ready') return;
+    clearTimeout(retryTimer.current);
+    retryTimer.current = setTimeout(() => captureAndDetect(), 350);
+    return () => clearTimeout(retryTimer.current);
+  }, [cameraReady, hasPermission, retryCount]);
+
   const captureAndDetect = async () => {
-    if (!isMounted.current) return;
+    if (!isMounted.current || !cameraReady || captureInProgress.current) return;
+    captureInProgress.current = true;
     try {
       setStatus('capturing');
-      setMessage(t.verifying);
-
-      // Small delay for camera stabilization
-      await new Promise(r => setTimeout(r, 400));
-
-      if (!camera.current) {
-        retry();
-        return;
-      }
+      setMessage(t.showFace);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      if (!camera.current) return retry();
 
       const photo = await camera.current.takePhoto({ qualityPrioritization: 'speed' });
-
-      if (!photo?.path) {
-        retry();
-        return;
-      }
+      if (!photo?.path) return retry();
 
       setStatus('processing');
-
-      // MLKit needs file:// prefix on Android for local paths
-      const imageUrl = photo.path.startsWith('/') ? `file://${photo.path}` : photo.path;
+      const imageUrl = photo.path.startsWith('/') ? 'file://' + photo.path : photo.path;
       const faces = await FaceDetection.detect(imageUrl, {
         performanceMode: 'accurate',
         classificationMode: 'all',
       });
-
       if (!isMounted.current) return;
 
-      if (faces.length > 0) {
+      if (Array.isArray(faces) && faces.length > 0) {
         const face = faces[0];
         const leftEye = face.leftEyeOpenProbability ?? 0.5;
         const rightEye = face.rightEyeOpenProbability ?? 0.5;
         const avgEyeOpen = (leftEye + rightEye) / 2;
 
-        // Estimate snapshot area for size ratio
+        // Estimate face size ratio to ensure the person is close enough
         const frameArea = 640 * 480;
         const faceArea = face.frame.width * face.frame.height;
         const sizeRatio = Math.min(1, faceArea / (frameArea * 0.3));
 
-        // Liveness score: eyes open = real person + proper face size
+        // Liveness score: eyes open => real person + proper face size
         const score = Math.round((avgEyeOpen * 0.6 + sizeRatio * 0.4) * 100);
         const confidence = Math.min(99, Math.max(40, score));
 
+        retryCountRef.current = 0;
+        setRetryCount(0);
         setStatus('verified');
-        setMessage(t.verified);
-
-        setTimeout(() => {
+        setMessage(confidence >= 68 ? t.verified : t.verifiedLoose);
+        retryTimer.current = setTimeout(() => {
           if (isMounted.current) onVerified(category, confidence);
-        }, 1200);
+        }, 700);
       } else {
         retry();
       }
     } catch (error) {
       console.log('Face detection error:', error);
       retry();
+    } finally {
+      captureInProgress.current = false;
     }
   };
-
   const retry = () => {
     if (!isMounted.current) return;
-    const next = retryCount + 1;
+    const next = retryCountRef.current + 1;
+    retryCountRef.current = next;
     setRetryCount(next);
 
-    if (next >= 3) {
+    if (next >= 10) {
       setStatus('failed');
       setMessage(t.failed);
-      setTimeout(() => onFailed(t.failed), 2000);
+      retryTimer.current = setTimeout(() => onFailed(t.failed), 2000);
     } else {
       setStatus('ready');
-      setMessage(`${t.attempt} ${next + 1}/3 — ${t.showFace}`);
-      retryTimer.current = setTimeout(() => captureAndDetect(), 1500);
+      setMessage(`${t.attempt} ${next + 1}/10 - ${t.showFace}`);
     }
   };
 
@@ -141,6 +140,8 @@ export default function LivenessCamera({ category, onVerified, onFailed, onCance
         device={device}
         isActive={true}
         photo={true}
+        onInitialized={() => setCameraReady(true)}
+        onError={(error) => { console.log('Camera error:', error); retry(); }}
       />
 
       <View style={styles.overlay}>
@@ -175,6 +176,14 @@ export default function LivenessCamera({ category, onVerified, onFailed, onCance
         {isFailed && (
           <View style={styles.badgeFail}>
             <Text style={styles.badgeFailText}>{t.denied}</Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={() => {
+              retryCountRef.current = 0;
+              setRetryCount(0);
+              setStatus('ready');
+              setMessage(t.showFace);
+            }}>
+              <Text style={styles.retryBtnText}>{t.tryAgain}</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -188,6 +197,8 @@ export default function LivenessCamera({ category, onVerified, onFailed, onCance
 
 const english = {
   showFace: 'Look at the camera',
+  blink: 'Keep your face centered',
+  verifiedLoose: 'Face check passed with low confidence',
   verifying: 'Verifying identity...',
   verified: 'Face Verified! Sending alert...',
   failed: 'No face detected. Access denied.',
@@ -196,11 +207,14 @@ const english = {
   goBack: 'Go Back',
   cancel: 'Cancel',
   passed: 'Face Verification: PASSED',
-  denied: 'Access Denied — Real person required',
+  denied: 'Face not clear enough',
+  tryAgain: 'Try Again',
 };
 
 const nepal = {
   showFace: 'क्यामेरामा अनुहार देखाउनुहोस्',
+  blink: 'अनुहार क्यामेराको बीचमा राख्नुहोस्',
+  verifiedLoose: 'अनुहार भेटिएन, तर चेक पास गरियो',
   verifying: 'अनुहार जाँच्दै...',
   verified: 'प्रमाणित! अलर्ट पठाउँदै...',
   failed: 'अनुहार पत्ता लागेन। पहुँच अस्वीकृत।',
@@ -209,7 +223,8 @@ const nepal = {
   goBack: 'फिर्ता जानुहोस्',
   cancel: 'रद्द गर्नुहोस्',
   passed: 'अनुहार प्रमाणीकरण: सफल',
-  denied: 'पहुँच अस्वीकृत — वास्तविक व्यक्ति आवश्यक',
+  denied: 'अनुहार स्पष्ट देखिएन',
+  tryAgain: 'फेरि प्रयास गर्नुहोस्',
 };
 
 const styles = StyleSheet.create({
@@ -250,6 +265,8 @@ const styles = StyleSheet.create({
   badgeOkText: { color: '#86efac', fontSize: 14, fontWeight: '700' },
   badgeFail: { marginTop: 12, backgroundColor: 'rgba(239,68,68,0.3)', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20 },
   badgeFailText: { color: '#fca5a5', fontSize: 12, fontWeight: '700', textAlign: 'center' },
+  retryBtn: { marginTop: 10, backgroundColor: '#d4af37', paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8 },
+  retryBtnText: { color: '#102030', fontSize: 12, fontWeight: '900' },
 
   cancelBtn: { position: 'absolute', bottom: 50, paddingHorizontal: 40, paddingVertical: 12, borderRadius: 30, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)' },
   cancelBtnText: { color: 'rgba(255,255,255,0.7)', fontSize: 16, fontWeight: '700' },

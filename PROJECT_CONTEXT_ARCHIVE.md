@@ -218,6 +218,11 @@ IDLE → SOS Received (Red LED flash 500ms) → ESP-NOW Send → Dashboard Alert
 - Noto Sans Devanagari font for proper rendering
 - All escalation timer, dispatch form, and face verification text translated
 
+### Q. Floating Agency Dispatch Coordination Animation
+- **Top-Right Map Overlay:** Displays agency dispatch status tracker box overlaying the map screen (`fixed top-16 right-4 z-[9999]`) rather than clogging the active incident cards.
+- **Sequential Animation:** Auto-triggers on dispatch, showing a real-time cascading update chain: Hospital Services (🏥) -> Nepal Army Command (🪖) -> Armed Police Force - APF (🛡️) -> Local Volunteers Chain (🤝).
+- **Auto-Dismissal:** Uses React state tracking and a `useEffect` timeout to automatically dismiss the coordination box exactly 8 seconds after dispatch.
+
 ### D. Cached Village Module Coordinates
 | ID | Name | Latitude | Longitude |
 |----|------|----------|-----------|
@@ -494,7 +499,7 @@ cd ~/Desktop/Prahari_Link_Hackathon/dashboard && npm run dev
 | ESP-B Firmware | ⚠️ Needs reflash v3 | v3 firmware with `struct_ack` dispatch struct, `parseAndSendACK()` pipe-parsing, enhanced ACK relay via ESP-NOW (92-byte struct instead of 1-byte `ackVal`). |
 | Backend | ✅ Ready v4 | Port 3001, Socket.io, SQLite DB, CSV export, monthly reports, node heartbeat tracking, FIR handler, mock injector with heartbeats, **enhanced ACK serial format** with dispatch details when available. |
 | Backend | ✅ Ready v5 | v4 + `phone_ble_ack` socket handler broadcasts `incident_ble_confirmed` to all dashboards |
-| Dashboard | ✅ Built v8 | v7 + Phone BLE Acknowledgment feature: `bleConfirmedNodes` state, socket listener, **📱 Phone Confirmed** (emerald) vs **🔄 Simulated** (blue) badges on volunteer panel incident cards, **📱 Phone Confirmed badge** on active incident cards alongside 📡 BLE Broadcast badge, auto-simulation fallback, scanner name + RSSI display. EN + ने translations. |
+| Dashboard | ✅ Built v9 | v8 + Floating Agency Dispatch Coordination overlay animation box (`fixed top-16 right-4 z-[9999]` with 8-second auto-dismiss timer), redesigned MapLegend, duplicate node labels resolution, z-index overlays fix, and pre-composed Google Gmail browser redirection. |
 | Mobile APK | ✅ Installed v4 | 8 categories, 3s countdown, Nepali toggle, MLKit face liveness, citizen name input, 7-pipe format. **v5 pending** — enhanced ACK parsing + volunteer BLE scanning + `react-native-ble-plx` |
 | ACK Chain | ✅ Verified | Dashboard → Backend → ESP-B → ESP-A → Phone (all 5 steps) |
 | Face Liveness | ✅ Live | MLKit blink detection → sends `FACE|confidence` instead of `FAKE|0` |
@@ -521,6 +526,7 @@ cd ~/Desktop/Prahari_Link_Hackathon/dashboard && npm run dev
 | Phone BLE Acknowledgment | ✅ Live | Backend `phone_ble_ack` socket handler. Dashboard `bleConfirmedNodes` tracking. **📱 Phone Confirmed** vs **🔄 Simulated** badges on volunteer panel + incident cards. Scanner name + RSSI display. Auto-simulation fallback. Mock injector ~60% BLE ack simulation. |
 | Dashboard Incident Card Badges | ✅ Built | Active incident cards show **two badges**: 📡 BLE Broadcast (green pulsing) + 📱 Phone Confirmed (emerald static) when phone has detected the broadcast. |
 | APK v5 — Enhanced ACK + Volunteer BLE | ✅ Built v2 | Enhanced ACK dispatch parsing, volunteer registration screen, BLE scanning with `react-native-ble-plx`, volunteer mode with incident feed. `react-native-ble-plx` installed. |
+| Dashboard (v9) | ✅ Built | Move Agency Dispatch Coordination Tracker to Floating Map Overlay (`fixed top-16 right-4 z-[9999]`), sequential 4-agency status tracking animation with 8-second auto-dismiss, custom `MapLegend` relay and command control design, fixed duplicate node labels, and increased modal z-index levels. |
 
 ---
 

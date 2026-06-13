@@ -79,14 +79,13 @@ Prahari_Link_Hackathon/
 Use these to verify file integrity after transfer:
 
 ```
-a820c88c241b7078e1cb4323e05dfde6  mobile_app/Prahari_Link_Demo_v4.apk
-13a28d554cfcd8e8cd01c1688a9517f7  backend/server.js
-ecc1013209e355c95390ed8f62f8df29  backend/database.js
-82def28d12343a4a4e6f56c371912773  backend/mock_injector.js
-d43157f41ec9746bb8180312999aad16  dashboard/src/App.jsx
-312953d9519b987546e7bc26dd53acde  mobile_app/App.js
-5953b5411185c547af9f104b094527a9  firmware/production/relay_esp_a/relay_esp_a.ino
-74eb606c2ae90c2ebb82742eae8e5ff5  firmware/production/hub_esp_b/hub_esp_b.ino
+50991b526b1eacb2b0afa26013154587  mobile_app/Prahari_Link_Demo_v4.apk
+1b11637718fe92ef23c5f3cad19ec7b7  backend/server.js
+8d69d48a8f22fb83e08b80a2e19d58cf  backend/database.js
+b55687a57682eebfef1f3c847d0cf9e8  dashboard/src/App.jsx
+70f8eb7fe9181f8df7ed0ec7c7abdedc  mobile_app/App.js
+bede706fb004cae9871d67c67fa6f491  firmware/production/relay_esp_a/relay_esp_a.ino
+8119db73f92c0d20df543b93c8c38b0d  firmware/production/hub_esp_b/hub_esp_b.ino
 ```
 
 ---
@@ -130,6 +129,31 @@ socket.emit('new_incident', { ...incident, source: 'simulated', status: 'active'
 
 #### `dashboard/src/App.jsx` — Static Node Status Visuals
 - **Mapped** static nodes to `ackIcon` (non-blinking green marker) when their active incident is acknowledged/dispatched, instead of staying blue. Also updated the sidebar village cards to reflect the green/dispatched status state dynamically.
+
+#### `dashboard/src/App.jsx` — Agency Dispatch Coordination Overlays & Animation
+- **Created** `FloatingAgencyCoordination` component and positioned it in the top-right overlay (`fixed top-16 right-4 z-[9999]`) in front of the map screen.
+- **Implemented** sequential agency dispatch notification animations: Hospital Services (🏥) -> Nepal Army Command (🪖) -> Armed Police Force (🛡️) -> Local Volunteers Chain (🤝) with corresponding status indicators.
+- **Removed** the embedded coordination tracker from the active incident cards in the sidebar scrollbar.
+- **Added** a React state hook and `useEffect` timer in the main `App` component to track dispatches in real time and automatically dismiss the floating overlay after 8 seconds.
+
+#### `dashboard/src/App.jsx` — Coverage Legend Redesign
+- **Redesigned** `MapLegend` with custom color coding and icon representations to properly display relays (Red/Blue/Green) and Command Control (CMD_CTRL in Purple).
+
+#### `dashboard/src/App.jsx` — Map Labeling and Icon Customization
+- **Fixed** duplicate node labeling in the Leaflet map rendering.
+- **Customized** CMD_CTRL map marker icon styling and anchor offset.
+
+#### `dashboard/src/App.jsx` — NDRRMA Google Gmail Redirection
+- **Updated** the NDRRMA escalation trigger form to open Google Gmail directly in the browser with pre-composed incident summary email, bypassing local mail client conflicts (e.g. Thunderbird).
+
+#### `dashboard/src/App.jsx` — Superior Officer Settings Update
+- **Updated** the default superior settings contact to `DIGP BHUPENDRA BAHADUR KHATRI` (phone `98512345678`).
+
+#### `dashboard/src/App.jsx` — Z-Index Modal Layout Corrections
+- **Increased** modal z-index layer levels (`z-[9999]` and `z-[2000]`) to ensure the dispatch form, NDRRMA form, and training session modals render correctly above the Leaflet map panes.
+
+#### `dashboard/src/App.jsx` — Siren and Drill Session Fixes
+- **Resolved** buzzer auto-stop behavior on resolution and added proper `alert_id` propagation for drill incidents.
 
 ### 3c. Mobile App Changes
 

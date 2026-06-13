@@ -122,20 +122,6 @@
   }
 }
 
-/* Coverage area glow */
-.coverage-circle {
-  animation: coverage-pulse 3s ease-in-out infinite;
-}
-
-@keyframes coverage-pulse {
-  0%, 100% {
-    opacity: 0.15;
-  }
-  50% {
-    opacity: 0.25;
-  }
-}
-
 /* Communication line signal flow */
 .comm-line {
   stroke-dasharray: 8 4;

@@ -413,14 +413,6 @@ function useSirenSound() {
 
 
 function CoverageOverlay({ nodes, activeNodeIDs }) {
-  const connections = [];
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const isActive = activeNodeIDs.has(nodes[i].id) || activeNodeIDs.has(nodes[j].id);
-      connections.push({ from: nodes[i], to: nodes[j], active: isActive });
-    }
-  }
-
   return (
     <>
       {/* Coverage circles for each node */}
@@ -435,7 +427,6 @@ function CoverageOverlay({ nodes, activeNodeIDs }) {
             fillOpacity: 0.2,
             weight: 2,
             opacity: 0.6,
-            className: 'coverage-circle',
           }}
         >
           <Popup>
@@ -447,20 +438,6 @@ function CoverageOverlay({ nodes, activeNodeIDs }) {
             </div>
           </Popup>
         </Circle>
-      ))}
-      {/* Communication mesh lines */}
-      {connections.map((conn, i) => (
-        <Polyline
-          key={`conn-${i}`}
-          positions={[conn.from.coords, conn.to.coords]}
-          pathOptions={{
-            color: '#60a5fa',
-            weight: conn.active ? 2 : 1,
-            opacity: conn.active ? 0.6 : 0.15,
-            dashArray: conn.active ? '8 4' : '4 6',
-            className: conn.active ? 'comm-line' : '',
-          }}
-        />
       ))}
     </>
   );

@@ -2074,11 +2074,11 @@ export default function App() {
               </Marker>
             );
           })}
-          <MapBoundsFitter nodes={[...STATIC_NODES, ...dynamicNodes]} />
+          <MapBoundsFitter nodes={[...STATIC_NODES, ...dynamicNodes.filter(dn => !STATIC_NODES.some(sn => sn.id === dn.id))]} />
           {lastIncident && <MapFlyTo center={getMapCoords(lastIncident)} />}
           <CoverageOverlay nodes={STATIC_NODES} activeNodeIDs={activeNodeIDs} />
           <MapLegend />
-          <NodeLabels nodes={[...STATIC_NODES, ...dynamicNodes]} />
+          <NodeLabels nodes={[...STATIC_NODES, ...dynamicNodes.filter(dn => !STATIC_NODES.some(sn => sn.id === dn.id))]} />
           <MapResizer />
         </MapContainer>
 

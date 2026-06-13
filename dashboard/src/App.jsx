@@ -507,16 +507,22 @@ function NodeLabels({ nodes }) {
   return null;
 }
 
-function AgencyCoordinationTracker({ dispatchedAt }) {
-  const startTs = dispatchedAt || (Date.now() - 10000);
-  const [elapsed, setElapsed] = React.useState(Date.now() - startTs);
+function FloatingAgencyCoordination({ incident }) {
+  const [elapsed, setElapsed] = React.useState(0);
 
   React.useEffect(() => {
+    if (!incident || !incident.dispatchedAt) return;
     const interval = setInterval(() => {
-      setElapsed(Date.now() - startTs);
+      const diff = Date.now() - incident.dispatchedAt;
+      setElapsed(diff);
+      if (diff > 8000) {
+        clearInterval(interval);
+      }
     }, 100);
     return () => clearInterval(interval);
-  }, [startTs]);
+  }, [incident]);
+
+  if (!incident) return null;
 
   const agencies = [
     { name: 'Hospital Services', icon: '🏥', delay: 1200 },
@@ -526,15 +532,25 @@ function AgencyCoordinationTracker({ dispatchedAt }) {
   ];
 
   return (
-    <div className="mt-2.5 p-2.5 bg-purple-950/20 border border-purple-900/30 rounded-xl">
-      <div className="text-[10px] text-purple-400 font-bold uppercase tracking-wider mb-2 flex items-center justify-between">
-        <span>📡 Agency Dispatch Coordination</span>
+    <div 
+      className="fixed top-16 right-4 z-[9999] bg-gray-950/95 backdrop-blur-md border border-purple-500/30 rounded-2xl p-4 shadow-[0_10px_40px_rgba(168,85,247,0.25)] w-[260px]"
+      style={{ animation: 'sms-slide-in 0.4s ease-out' }}
+    >
+      <div className="flex items-center justify-between mb-2 pb-1 border-b border-gray-800">
+        <div className="flex items-center gap-1.5 text-purple-400 font-bold uppercase tracking-wider text-[9px]">
+          <span>📡 Agency Dispatch Coordination</span>
+        </div>
         {elapsed < 6500 ? (
-          <span className="text-[8px] text-purple-300 animate-pulse font-mono">Syncing...</span>
+          <span className="text-[7.5px] text-purple-300 animate-pulse font-mono">Syncing...</span>
         ) : (
-          <span className="text-[8px] text-green-400 font-mono">Completed</span>
+          <span className="text-[7.5px] text-green-400 font-mono">Completed</span>
         )}
       </div>
+      
+      <div className="mb-2 text-[9px] text-gray-400">
+        Target Node: <span className="font-mono text-gray-200 font-semibold">{incident.nodeID}</span>
+      </div>
+
       <div className="space-y-1.5">
         {agencies.map((agency, idx) => {
           const isDone = elapsed >= agency.delay;
@@ -542,8 +558,8 @@ function AgencyCoordinationTracker({ dispatchedAt }) {
           return (
             <div
               key={idx}
-              className={`flex items-center justify-between text-[10px] transition-all duration-500 px-2 py-1 rounded-lg ${
-                isDone ? 'text-gray-300 bg-gray-800/20 border border-gray-700/10' : isCurrent ? 'text-purple-300 bg-purple-900/20 border border-purple-800/20 animate-pulse' : 'text-gray-600 opacity-20'
+              className={`flex items-center justify-between text-[10px] transition-all duration-300 px-2 py-1 rounded-lg ${
+                isDone ? 'text-gray-300 bg-gray-900/40 border border-gray-800/30' : isCurrent ? 'text-purple-300 bg-purple-900/20 border border-purple-800/20 animate-pulse' : 'text-gray-600 opacity-20'
               }`}
             >
               <div className="flex items-center gap-2">
@@ -737,6 +753,27 @@ const getMapCoords = (inc) => {
 export default function App() {
   const [incidents, setIncidents] = useState([]);
   const [nodeStatuses, setNodeStatuses] = useState({});
+  const [currentDispatchedIncident, setCurrentDispatchedIncident] = useState(null);
+
+  useEffect(() => {
+    const latest = incidents.find(inc => {
+      if (inc.status !== 'dispatched' || !inc.dispatchedAt) return false;
+      const ts = typeof inc.dispatchedAt === 'number' ? inc.dispatchedAt : Date.parse(inc.dispatchedAt);
+      return Date.now() - ts < 8000;
+    });
+
+    if (latest) {
+      setCurrentDispatchedIncident(latest);
+      const ts = typeof latest.dispatchedAt === 'number' ? latest.dispatchedAt : Date.parse(latest.dispatchedAt);
+      const remaining = 8000 - (Date.now() - ts);
+      const timer = setTimeout(() => {
+        setCurrentDispatchedIncident(null);
+      }, Math.max(0, remaining));
+      return () => clearTimeout(timer);
+    } else {
+      setCurrentDispatchedIncident(null);
+    }
+  }, [incidents]);
 
   // Dynamically derive nodes from heartbeats/statuses
   const dynamicNodes = React.useMemo(() => {
@@ -1817,24 +1854,21 @@ export default function App() {
                 )}
 
                 {(inc.status === 'dispatched' || inc.status === 'resolved') && inc.dispatchInfo && (
-                  <>
-                    <div className="mt-2 p-2 bg-blue-950/30 border border-blue-800/40 rounded-lg">
-                      <div className="text-[10px] text-blue-400 font-semibold mb-1">{'\u{1F694}'} Dispatched</div>
-                      <div className="text-xs text-gray-300"><span className="text-gray-500">Commander:</span> {inc.dispatchInfo.commander}</div>
-                      <div className="text-xs text-gray-300"><span className="text-gray-500">Personnel:</span> {inc.dispatchInfo.personnel}</div>
-                      {inc.dispatchInfo.equipment && (
-                        <div className="text-xs text-gray-300 mt-0.5">
-                          <span className="text-gray-500">Equipment:</span>{' '}
-                          {Array.isArray(inc.dispatchInfo.equipment)
-                            ? inc.dispatchInfo.equipment.join(', ')
-                            : typeof inc.dispatchInfo.equipment === 'string'
-                            ? inc.dispatchInfo.equipment.split('; ').join(', ')
-                            : ''}
-                        </div>
-                      )}
-                    </div>
-                    <AgencyCoordinationTracker dispatchedAt={inc.dispatchedAt} />
-                  </>
+                  <div className="mt-2 p-2 bg-blue-950/30 border border-blue-800/40 rounded-lg">
+                    <div className="text-[10px] text-blue-400 font-semibold mb-1">{'\u{1F694}'} Dispatched</div>
+                    <div className="text-xs text-gray-300"><span className="text-gray-500">Commander:</span> {inc.dispatchInfo.commander}</div>
+                    <div className="text-xs text-gray-300"><span className="text-gray-500">Personnel:</span> {inc.dispatchInfo.personnel}</div>
+                    {inc.dispatchInfo.equipment && (
+                      <div className="text-xs text-gray-300 mt-0.5">
+                        <span className="text-gray-500">Equipment:</span>{' '}
+                        {Array.isArray(inc.dispatchInfo.equipment)
+                          ? inc.dispatchInfo.equipment.join(', ')
+                          : typeof inc.dispatchInfo.equipment === 'string'
+                          ? inc.dispatchInfo.equipment.split('; ').join(', ')
+                          : ''}
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {/* FIR reference section */}
@@ -2165,6 +2199,8 @@ export default function App() {
         }} title="Open in Google Maps">
           {'\u{1F4CD}'} {lastIncident ? `${lastIncident.coords[0].toFixed(4)}, ${lastIncident.coords[1].toFixed(4)}` : (dynamicNodes[0] ? `${dynamicNodes[0].coords[0].toFixed(4)}, ${dynamicNodes[0].coords[1].toFixed(4)}` : '27.7000, 85.3000')}
         </div>
+
+        {currentDispatchedIncident && <FloatingAgencyCoordination incident={currentDispatchedIncident} />}
       </div>
 
       {/* NDRRMA Escalation Confirmation Modal */}

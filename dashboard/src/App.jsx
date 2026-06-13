@@ -647,7 +647,8 @@ function formatTime(seconds) {
 // Helper to calculate distance between phone GPS and node
 const getDistance = (inc, nodes) => {
   if (!inc || !inc.coords || !inc.coords[0] || !inc.coords[1]) return null;
-  const node = nodes.find(n => n.id === inc.nodeID);
+  const nodesList = nodes || [];
+  const node = nodesList.find(n => n.id === inc.nodeID);
   if (!node || !node.coords) return null;
   const latDiff = (inc.coords[0] - node.coords[0]) * 111320;
   const lonDiff = (inc.coords[1] - node.coords[1]) * 111320 * Math.cos(inc.coords[0] * Math.PI / 180);
@@ -1769,23 +1770,25 @@ export default function App() {
                       <input
                         className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-[10px] text-white font-mono"
                         placeholder={t.firPlaceholder}
-                        value={firInputs[inc.nodeID] || ''}
-                        onChange={(e) => setFirInputs(prev => ({ ...prev, [inc.nodeID]: e.target.value }))}
+                        value={firInputs[inc.alert_id || inc.nodeID] || ''}
+                        onChange={(e) => setFirInputs(prev => ({ ...prev, [inc.alert_id || inc.nodeID]: e.target.value }))}
                         maxLength={30}
                       />
                       <button
                         onClick={() => {
-                          const val = (firInputs[inc.nodeID] || '').trim();
+                          const val = (firInputs[inc.alert_id || inc.nodeID] || '').trim();
                           if (!val) return;
-                          socket.emit('update_fir', { nodeID: inc.nodeID, firNumber: val });
+                          socket.emit('update_fir', { alertID: inc.alert_id, nodeID: inc.nodeID, firNumber: val });
                           // Optimistic update
-                          setIncidents(prev => prev.map(x =>
-                            x.nodeID === inc.nodeID ? { ...x, fir_number: val, status: 'resolved' } : x
-                          ));
-                          setFirInputs(prev => ({ ...prev, [inc.nodeID]: '' }));
+                          setIncidents(prev => prev.map(x => {
+                            const matchByAlertId = inc.alert_id && x.alert_id === inc.alert_id;
+                            const matchByNodeId = !inc.alert_id && x.nodeID === inc.nodeID && x.status !== 'resolved';
+                            return (matchByAlertId || matchByNodeId) ? { ...x, fir_number: val, status: 'resolved' } : x;
+                          }));
+                          setFirInputs(prev => ({ ...prev, [inc.alert_id || inc.nodeID]: '' }));
                         }}
                         className="px-2 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-[9px] font-bold rounded-lg transition-colors disabled:opacity-40"
-                        disabled={!firInputs[inc.nodeID]?.trim()}
+                        disabled={!firInputs[inc.alert_id || inc.nodeID]?.trim()}
                       >
                         {t.submitFIR}
                       </button>
@@ -1871,7 +1874,7 @@ export default function App() {
                           </span>
                         )}
                         {(() => {
-                          const dist = getDistance(inc);
+                          const dist = getDistance(inc, [...STATIC_NODES, ...dynamicNodes]);
                           return dist !== null && dist > 1500 ? (
                             <span className="text-yellow-500 font-semibold text-[8px]">
                               (⚠️ Remote: {Math.round(dist/1000)}km)
@@ -2060,7 +2063,7 @@ export default function App() {
           })}
           <MapBoundsFitter nodes={[...STATIC_NODES, ...dynamicNodes]} />
           {lastIncident && <MapFlyTo center={getMapCoords(lastIncident)} />}
-          <CoverageOverlay nodes={[...STATIC_NODES, ...dynamicNodes]} activeNodeIDs={activeNodeIDs} />
+          <CoverageOverlay nodes={STATIC_NODES} activeNodeIDs={activeNodeIDs} />
           <MapLegend />
           <NodeLabels nodes={[...STATIC_NODES, ...dynamicNodes]} />
           <MapResizer />

@@ -33,9 +33,11 @@ try {
 
 // Helper: update a cached incident in-place so refreshes see current state
 function updateCachedIncident(nodeID, updates) {
-  const idx = recentIncidents.findIndex(
-    i => i.nodeID === nodeID && i.status !== 'resolved' && i.status !== 'archived'
-  );
+  const alertID = updates.alert_id;
+  const idx = recentIncidents.findIndex(i => {
+    if (alertID && i.alert_id === alertID) return true;
+    return i.nodeID === nodeID && i.status !== 'resolved' && i.status !== 'archived';
+  });
   if (idx !== -1) {
     recentIncidents[idx] = { ...recentIncidents[idx], ...updates };
   }
@@ -524,16 +526,16 @@ io.on('connection', (socket) => {
 
   // When an incident has an FIR filed
   socket.on('update_fir', (data) => {
-    if (!data || !data.nodeID || !data.firNumber) {
+    if (!data || !data.alertID || !data.firNumber) {
       console.log('Invalid update_fir payload');
       return;
     }
-    const { nodeID, firNumber } = data;
-    console.log(`Updating FIR for ${nodeID}: ${firNumber}`);
+    const { alertID, nodeID, firNumber } = data;
+    console.log(`Updating FIR for ${nodeID || alertID}: ${firNumber}`);
 
     const result = trainingMode
-      ? DB.updateTrainingIncidentFIR(nodeID, firNumber)
-      : DB.updateIncidentFIR(nodeID, firNumber);
+      ? DB.updateTrainingIncidentFIR(alertID, firNumber)
+      : DB.updateIncidentFIR(alertID, firNumber);
 
     if (result) {
       const updatePayload = {

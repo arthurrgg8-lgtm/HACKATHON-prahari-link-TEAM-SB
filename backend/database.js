@@ -273,15 +273,8 @@ const DB = {
   },
 
   /** Update an incident with FIR number and resolve it */
-  updateIncidentFIR(nodeID, firNumber) {
+  updateIncidentFIR(alertID, firNumber) {
     const now = new Date().toISOString();
-    const alert = db.prepare(`
-      SELECT alert_id FROM alerts
-      WHERE node_id = ? AND (status = 'dispatched' OR status = 'escalated')
-      ORDER BY triggered_at DESC LIMIT 1
-    `).get(nodeID);
-
-    if (!alert) return null;
 
     db.prepare(`
       UPDATE alerts SET
@@ -289,9 +282,9 @@ const DB = {
         status = 'resolved',
         fir_number = ?
       WHERE alert_id = ?
-    `).run(now, firNumber, alert.alert_id);
+    `).run(now, firNumber, alertID);
 
-    return { alertID: alert.alert_id, resolvedAt: now };
+    return { alertID, resolvedAt: now };
   },
 
   /** Escalate an incident */
@@ -535,15 +528,8 @@ const DB = {
   },
 
   /** Update a training incident with FIR number and resolve it */
-  updateTrainingIncidentFIR(nodeID, firNumber) {
+  updateTrainingIncidentFIR(alertID, firNumber) {
     const now = new Date().toISOString();
-    const alert = db.prepare(`
-      SELECT alert_id FROM trainings
-      WHERE node_id = ? AND (status = 'dispatched' OR status = 'escalated')
-      ORDER BY triggered_at DESC LIMIT 1
-    `).get(nodeID);
-
-    if (!alert) return null;
 
     db.prepare(`
       UPDATE trainings SET
@@ -551,9 +537,9 @@ const DB = {
         status = 'resolved',
         fir_number = ?
       WHERE alert_id = ?
-    `).run(now, firNumber, alert.alert_id);
+    `).run(now, firNumber, alertID);
 
-    return { alertID: alert.alert_id, resolvedAt: now };
+    return { alertID, resolvedAt: now };
   },
 
   /** Escalate a training incident */

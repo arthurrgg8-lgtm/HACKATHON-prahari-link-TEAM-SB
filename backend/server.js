@@ -5,6 +5,52 @@ const { SerialPort } = require('serialport');
 const cors = require('cors');
 const { execSync } = require('child_process');
 const DB = require('./database');
+const https = require('https');
+
+function sendTelegramNotification(text) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) {
+    console.log('[Telegram] Bot token or Chat ID not configured in environment. Skipping Telegram alert.');
+    return;
+  }
+
+  const payload = JSON.stringify({
+    chat_id: chatId,
+    text: text,
+    parse_mode: 'HTML',
+  });
+
+  const options = {
+    hostname: 'api.telegram.org',
+    port: 443,
+    path: `/bot${token}/sendMessage`,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload),
+    },
+  };
+
+  const req = https.request(options, (res) => {
+    let body = '';
+    res.on('data', (chunk) => { body += chunk; });
+    res.on('end', () => {
+      if (res.statusCode === 200) {
+        console.log('[Telegram] Notification sent successfully!');
+      } else {
+        console.error(`[Telegram] Failed to send notification: ${res.statusCode} - ${body}`);
+      }
+    });
+  });
+
+  req.on('error', (e) => {
+    console.error('[Telegram] Error sending notification:', e.message);
+  });
+
+  req.write(payload);
+  req.end();
+}
 
 const PORT = Number(process.env.PORT || 3001);
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
@@ -603,6 +649,24 @@ io.on('connection', (socket) => {
       };
       updateCachedIncident(nodeID, updatePayload);
       io.emit('incident_updated', updatePayload);
+
+      // 📢 Send Telegram escalation notification to superior officer
+      const inc = recentIncidents.find(i => result.alertID ? i.alert_id === result.alertID : i.nodeID === nodeID);
+      if (inc) {
+        const coords = inc.coords || [];
+        const lat = coords[0] || 0;
+        const lon = coords[1] || 0;
+        const msg = `🚨 <b>[PRAHARI-LINK] ESCALATION ALERT</b> 🚨\n\n` +
+                    `⚠️ <b>Dispatch Timeout Expired (5 Min Delay)</b>\n\n` +
+                    `• <b>Node/Station</b>: ${inc.nodeID || 'UNKNOWN'}\n` +
+                    `• <b>Category</b>: ${inc.category || 'N/A'}\n` +
+                    `• <b>Citizen Name</b>: ${inc.citizenName || 'Anonymous'}\n` +
+                    `• <b>Note</b>: ${inc.note || 'Emergency SOS triggered'}\n` +
+                    `• <b>Coordinates</b>: ${lat}, ${lon}\n\n` +
+                    `🗺️ <a href="https://www.google.com/maps?q=${lat},${lon}">Open in Google Maps</a>\n\n` +
+                    `<i>Action: Contact the dispatch operator immediately to deploy forces.</i>`;
+        sendTelegramNotification(msg);
+      }
     }
   });
 

@@ -49,3 +49,7 @@ logs/
 # ── Arduino Build ──
 firmware/build/
 firmware/**/build/
+
+# ── Screenshots & Diagnostic Dumps ──
+screenshot*.png
+window_dump*.xml

@@ -451,6 +451,9 @@ export default function App() {
   const btRetryCountRef = useRef(0);
   const btRetryTimerRef = useRef(null);
   const btHealthTimerRef = useRef(null);
+  const btConnectInProgressRef = useRef(false);
+  const btDataSubscriptionRef = useRef(null);
+  const btConnectionLostSubscriptionRef = useRef(null);
 
   // Helper: find a device by name (exact then partial)
   const findRelay = (devices) => {
@@ -465,6 +468,8 @@ export default function App() {
 
   // Scan for and connect to the Prahari-Link-V1 relay
   const scanForRelay = async () => {
+    if (btConnectInProgressRef.current) return;
+    btConnectInProgressRef.current = true;
     setBtStatus('scanning');
     setBtErrorMessage('');
     try {
@@ -508,14 +513,19 @@ export default function App() {
         setBtErrorMessage('Connecting to ' + relay.name + '...');
         try {
           await BluetoothSerial.connect(relay.id);
+          await new Promise(resolve => setTimeout(resolve, 350));
+          const connectionActive = await BluetoothSerial.isConnected(relay.id);
+          if (!connectionActive) throw new Error('Relay closed the Bluetooth connection');
           setConnected(true);
           setBtStatus('connected');
           setBtErrorMessage('');
           btRetryCountRef.current = 0; 
 
           try {
-            await BluetoothSerial.withDelimiter('\n');
-            BluetoothSerial.on('data', (data) => {
+            await BluetoothSerial.withDelimiter('\n', relay.id);
+            if (btDataSubscriptionRef.current) btDataSubscriptionRef.current.remove();
+            btDataSubscriptionRef.current = BluetoothSerial.on('data', (data) => {
+              if (data.id && data.id !== relay.id) return;
               const message = data.data?.toString().trim();
               console.log('BT Received:', message);
               
@@ -561,24 +571,35 @@ export default function App() {
           if (btRetryCountRef.current < 3) {
             setBtStatus('scanning');
             setBtErrorMessage(`Connection failed, retrying (${btRetryCountRef.current}/3)...`);
-            btRetryTimerRef.current = setTimeout(() => scanForRelay(), 3000);
+            btRetryTimerRef.current = setTimeout(() => {
+              btRetryTimerRef.current = null;
+              scanForRelay();
+            }, 3000);
           } else {
             setBtStatus('failed');
             setBtErrorMessage('Relay unavailable. Foreground reconnection remains active.');
             btRetryCountRef.current = 0;
-            btRetryTimerRef.current = setTimeout(() => scanForRelay(), 10000);
+            btRetryTimerRef.current = setTimeout(() => {
+              btRetryTimerRef.current = null;
+              scanForRelay();
+            }, 10000);
           }
         }
       } else {
         setBtStatus('failed');
         setBtErrorMessage('Relay not found. Foreground reconnection will retry automatically.');
-        btRetryTimerRef.current = setTimeout(() => scanForRelay(), 10000);
+        btRetryTimerRef.current = setTimeout(() => {
+              btRetryTimerRef.current = null;
+              scanForRelay();
+            }, 10000);
         console.log('Relay not found. Bonded:', devices.map(d => d.name), 'Searched for: Prahari-Link-V1');
       }
     } catch (err) {
       console.log('BT error:', err);
       setBtStatus('failed');
       setBtErrorMessage(err.message || 'Bluetooth connection failed. Make sure Bluetooth is on.');
+    } finally {
+      btConnectInProgressRef.current = false;
     }
   };
 
@@ -654,6 +675,26 @@ export default function App() {
     const init = async () => {
       try {
         await requestPermissions();
+
+        setTimeout(() => {
+          scanForRelay();
+        }, 250);
+        btHealthTimerRef.current = setInterval(async () => {
+          try {
+            const active = await BluetoothSerial.isConnected();
+            if (!active && !btRetryTimerRef.current) await scanForRelay();
+          } catch (error) {
+            console.log('Bluetooth health check failed:', error);
+          }
+        }, 15000);
+        btConnectionLostSubscriptionRef.current = BluetoothSerial.on('connectionLost', event => {
+          console.log('BT connection lost:', event?.message || 'socket closed');
+          setConnected(false);
+          setBtStatus('searching');
+          setBtErrorMessage('Relay disconnected. Reconnecting...');
+          // The connect promise performs the controlled retry after confirming loss.
+        });
+
         try {
           const { status } = await Location.requestForegroundPermissionsAsync();
           if (status === 'granted') {
@@ -715,17 +756,6 @@ export default function App() {
           }).catch(err => console.log('SharedPreferences error:', err));
         }
 
-        setTimeout(async () => {
-          await scanForRelay();
-        }, 2000);
-        btHealthTimerRef.current = setInterval(async () => {
-          try {
-            const active = await BluetoothSerial.isConnected();
-            if (!active && !btRetryTimerRef.current) await scanForRelay();
-          } catch (error) {
-            console.log('Bluetooth health check failed:', error);
-          }
-        }, 15000);
       } catch (e) { console.log('Init error:', e); }
     };
     init();
@@ -733,6 +763,8 @@ export default function App() {
       if (batterySubRef.current) batterySubRef.current.remove();
       if (btRetryTimerRef.current) clearTimeout(btRetryTimerRef.current);
       if (btHealthTimerRef.current) clearInterval(btHealthTimerRef.current);
+      if (btDataSubscriptionRef.current) btDataSubscriptionRef.current.remove();
+      if (btConnectionLostSubscriptionRef.current) btConnectionLostSubscriptionRef.current.remove();
       if (countdownRef.current) clearInterval(countdownRef.current);
       if (sosSendTimeoutRef.current) clearTimeout(sosSendTimeoutRef.current);
       if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);

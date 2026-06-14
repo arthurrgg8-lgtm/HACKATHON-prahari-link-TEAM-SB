@@ -543,7 +543,45 @@ cd ~/Desktop/Prahari_Link_Hackathon/dashboard && npm run dev
 
 ---
 
-*End of Archive — June 11, 2026 — All 30 features complete — Phone BLE Acknowledgment + Incident Card Badges + End-to-End Verification — Backend v5, Dashboard v8, APK v2 with react-native-ble-plx*
+## Git Restore Point — `working-clean-hackathon`
+
+**Created:** June 14, 2026  
+**Commit:** `88a638a` (main branch)  
+**Tag Type:** Annotated (contains full architecture breakdown in tag message)  
+**Purpose:** Known-good working state — restore if anything breaks during future development.
+
+### How to Restore
+```bash
+git checkout working-clean-hackathon
+
+# Start backend:
+cd backend && node server.js &
+
+# Start dashboard:
+cd dashboard && npx vite --host 0.0.0.0 &
+
+# (Optional) Mock injector:
+cd backend && node mock_injector.js &
+```
+
+### What's Preserved at This State
+
+| Area | Key Features |
+|------|-------------|
+| **Backend** (`:3001`) | Express + Socket.IO, SQLite, Telegram bot, serial bridge to ESP-B, 5-min auto-escalation, 3 drill scenarios, Beat Officer shifts, CSV/report exports, node heartbeat tracking (30s/60s thresholds) |
+| **Dashboard** (`:5173`) | React 18 + Leaflet map (4 nodes), real-time incident queue (CRITICAL→HIGH→MEDIUM), dispatch form, escalation countdown, NDRRMA escalation, SMS alert modal, Volunteer Network panel, BLE confirmation tracking, training session mgmt, bilingual (EN/ने), siren alerts, Agency Dispatch Coordination overlay, 15km geofence alerting |
+| **Mobile App** | 8-category SOS grid, MLKit face liveness detection, BLE volunteer scanning (react-native-ble-plx), Classic BT serial to ESP-A, Android foreground service |
+| **Firmware** | ESP-A (relay_esp_a.ino) — Classic BT + BLE beacon + ESP-NOW, ESP-B (hub_esp_b.ino) — Serial JSON + ESP-NOW relay |
+| **Config** | Dev tokens (`prahari-operator-demo-2026`, `prahari-ingest-demo-2026`), screenshots/window_dumps in .gitignore |
+
+### View Full Tag Message
+```bash
+git tag -l 'working-clean-hackathon' -n100
+```
+
+---
+
+*End of Archive — June 14, 2026 — All 30 features + Git restore point `working-clean-hackathon` saved*
 
 ## 11. Prahari-Link Mobile APK Upgrade Plan (June 13, 2026)
 

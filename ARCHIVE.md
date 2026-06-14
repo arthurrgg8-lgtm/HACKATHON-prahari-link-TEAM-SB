@@ -367,3 +367,45 @@ Dashboard                     Backend                   ESP-B                   
 - `react-native-ble-plx` — manufacturer data handling may vary by platform version
 - ESP-A uses `PartitionScheme=huge_app` — only matters for re-flashing
 - Dashboard's `activeNodeIDs` includes escalated incidents in mesh lines — cosmetic
+
+---
+
+## 10. Git Restore Point — `working-clean-hackathon`
+
+**Created:** June 14, 2026  
+**Commit:** `88a638a` (on main branch)  
+**Purpose:** Known-good working state that can be restored if anything breaks during future development.
+
+### What's Tagged
+
+| Component | Details |
+|-----------|---------|
+| **Backend** | Express + Socket.IO server on port 3001, SQLite DB, Telegram notifications, 5-min auto-escalation, training drills, CSV export, serial bridge to ESP-B |
+| **Dashboard** | React 18 + Vite + Leaflet map, real-time incident queue, dispatch form, escalation timers, NDRRMA escalation, SMS alerts, Volunteer Network panel, BLE tracking, training sessions, Beat Officer shifts, bilingual (EN/ने) |
+| **Mobile App** | React Native with 8-category SOS grid, face liveness (MLKit), BLE scanning, Bluetooth serial to ESP-A, foreground service |
+| **Firmware** | ESP-A relay (BLE + Classic BT + ESP-NOW), ESP-B hub (Serial + ESP-NOW), diagnostic sketches |
+| **Gitignore** | `screenshot*.png` and `window_dump*.xml` excluded |
+
+### How to Restore
+```bash
+git checkout working-clean-hackathon
+
+# Start backend (port 3001):
+cd backend && node server.js &
+
+# Start dashboard (port 5173):
+cd dashboard && npx vite --host 0.0.0.0 &
+
+# (Optional) Start mock injector for testing without hardware:
+cd backend && node mock_injector.js &
+```
+
+### Tag Details (view full message)
+```bash
+git tag -l 'working-clean-hackathon' -n100
+```
+
+### Pre-Restore Checklist
+- [ ] Verify no unsaved changes: `git status`
+- [ ] Confirm port 3001 is free: `fuser 3001/tcp`
+- [ ] Confirm port 5173 is free: `fuser 5173/tcp`

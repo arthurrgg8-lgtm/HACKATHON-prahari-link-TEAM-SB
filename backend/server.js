@@ -4,37 +4,8 @@ const { Server } = require('socket.io');
 const { SerialPort } = require('serialport');
 const cors = require('cors');
 const { execSync } = require('child_process');
-const crypto = require('crypto');
 const DB = require('./database');
 const https = require('https');
-
-// ── Security & Rate Limiting ───────────────────────────────────────────────
-const triggerRateLimit = new Map(); // IP → { count, resetTime }
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const MAX_TRIGGERS_PER_WINDOW = 30;
-
-function checkRateLimit(ip) {
-  const now = Date.now();
-  const limit = triggerRateLimit.get(ip) || { count: 0, resetTime: now + RATE_LIMIT_WINDOW };
-  if (now > limit.resetTime) {
-    limit.count = 1;
-    limit.resetTime = now + RATE_LIMIT_WINDOW;
-  } else {
-    limit.count++;
-  }
-  triggerRateLimit.set(ip, limit);
-  return limit.count <= MAX_TRIGGERS_PER_WINDOW;
-}
-
-function timingSafeCompare(input, expected) {
-  if (typeof input !== 'string' || typeof expected !== 'string') return false;
-  if (input.length !== expected.length) return false;
-  try {
-    return crypto.timingSafeEqual(Buffer.from(input), Buffer.from(expected));
-  } catch (e) {
-    return false;
-  }
-}
 
 function sendTelegramNotification(text) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -106,23 +77,14 @@ function isAllowedOrigin(origin) {
 
 function validateIncident(data) {
   if (!data || typeof data !== 'object') return 'Incident payload must be an object';
-  if (typeof data.nodeID !== 'string' || !/^[A-Z0-9_-]{1,32}$/.test(data.nodeID)) return 'Invalid nodeID';
+  if (!/^[A-Z0-9_-]{1,32}$/.test(data.nodeID || '')) return 'Invalid nodeID';
   if (data.type === 'HEARTBEAT') return null;
   if (!VALID_CATEGORIES.has(data.category)) return 'Invalid category';
-  
   const coords = data.coords || [data.lat ?? data.latitude, data.lon ?? data.longitude];
   if (!Array.isArray(coords) || coords.length < 2 || !coords.every(Number.isFinite)) return 'Invalid coordinates';
-  
-  if (data.citizenName != null) {
-    if (typeof data.citizenName !== 'string') return 'Citizen name must be a string';
-    if (data.citizenName.length > 50) return 'Citizen name too long';
-  }
-  
-  const note = data.note ?? data.user_note;
-  if (note != null) {
-    if (typeof note !== 'string') return 'Note must be a string';
-    if (note.length > 200) return 'Incident note too long';
-  }
+  if (data.citizenName != null && String(data.citizenName).length > 30) return 'Citizen name too long';
+  if ((data.note != null && String(data.note).length > 99) ||
+      (data.user_note != null && String(data.user_note).length > 99)) return 'Incident note too long';
   return null;
 }
 
@@ -133,36 +95,13 @@ const corsOptions = {
 };
 
 const app = express();
-app.disable('x-powered-by');
-app.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  next();
-});
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '32kb' }));
-
 app.use('/api', (req, res, next) => {
   if (req.path === '/health') return next();
-  
   const token = req.get('x-prahari-token') || req.query.token;
   const expected = req.path === '/trigger' ? INGEST_TOKEN : OPERATOR_TOKEN;
-  
-  if (!token || !timingSafeCompare(token, expected)) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  
-  // Rate limit SOS triggers
-  if (req.path === '/trigger') {
-    const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
-    if (!checkRateLimit(ip)) {
-      console.warn(`[RATE LIMIT] SOS trigger blocked for IP: ${ip}`);
-      return res.status(429).json({ error: 'Too many SOS triggers. Please wait a minute.' });
-    }
-  }
-  
+  if (token !== expected) return res.status(401).json({ error: 'Unauthorized' });
   next();
 });
 
@@ -171,15 +110,9 @@ const io = new Server(server, { cors: corsOptions, maxHttpBufferSize: 64 * 1024 
 
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
-  if (!token) return next(new Error('Unauthorized'));
-  
-  if (timingSafeCompare(token, OPERATOR_TOKEN)) {
-    socket.data.role = 'operator';
-  } else if (timingSafeCompare(token, INGEST_TOKEN)) {
-    socket.data.role = 'ingest';
-  } else {
-    return next(new Error('Unauthorized'));
-  }
+  if (token === OPERATOR_TOKEN) socket.data.role = 'operator';
+  else if (token === INGEST_TOKEN) socket.data.role = 'ingest';
+  else return next(new Error('Unauthorized'));
   next();
 });
 const SERIAL_PORT_PATH = '/dev/ttyUSB0'; // ESP-B (Police Hub) detected here
@@ -436,23 +369,8 @@ app.get('/api/alerts/export/csv', (req, res) => {
 });
 
 // ── Monthly Report ─────────────────────────────────────────────────────────
-function clearEscalationTimer(alertID) {
-  if (!alertID || !escalationTimers.has(alertID)) return false;
-  clearTimeout(escalationTimers.get(alertID));
-  escalationTimers.delete(alertID);
-  return true;
-}
-
-function clearAllEscalationTimers() {
-  for (const timer of escalationTimers.values()) clearTimeout(timer);
-  const count = escalationTimers.size;
-  escalationTimers.clear();
-  return count;
-}
-
 function startAutoEscalationTimer(evt) {
   if (!evt.alert_id) return;
-  clearEscalationTimer(evt.alert_id);
   const isTraining = !!evt.training;
   const timer = setTimeout(() => {
     console.log(`[AUTO-ESCALATE] Timeout reached for ${evt.nodeID} (Alert: ${evt.alert_id})`);
@@ -508,18 +426,8 @@ function safeSerialWrite(data) {
 
 // ── Handle Data from Hardware ──────────────────────────────────────────────
 parser.on('data', (line) => {
-  let cleanedLine = line.toString().trim();
+  const cleanedLine = line.toString().trim();
   if (!cleanedLine) return;
-
-  // ESP32 boot/reset noise can be prepended to the first UART packet. Recover
-  // the JSON object instead of dropping a valid emergency as a hardware log.
-  const jsonStart = cleanedLine.indexOf('{');
-  if (jsonStart > 0) {
-    cleanedLine = cleanedLine.slice(jsonStart);
-  } else if (jsonStart === -1 && cleanedLine.includes('"category":') && cleanedLine.includes('"coords":')) {
-    const categoryStart = cleanedLine.indexOf('"category":');
-    cleanedLine = `{"nodeID":"NODE_A","type":"SOS",${cleanedLine.slice(categoryStart)}`;
-  }
 
   if (cleanedLine.startsWith('{')) {
     console.log('--- Hardware JSON Signal Received ---');
@@ -709,7 +617,9 @@ io.on('connection', (socket) => {
     console.log(`ACK for ${nodeID} (Alert: ${alertID})`);
 
     // Clear escalation timer if it exists
-    if (clearEscalationTimer(alertID)) {
+    if (alertID && escalationTimers.has(alertID)) {
+      clearTimeout(escalationTimers.get(alertID));
+      escalationTimers.delete(alertID);
       console.log(`[TIMER] Cleared escalation timer for alert ${alertID}`);
     }
 
@@ -768,7 +678,10 @@ io.on('connection', (socket) => {
     console.log(`Resolving: ${nodeID}`);
 
     // Also clear timer here just in case it was resolved before ACK
-    clearEscalationTimer(alertID);
+    if (alertID && escalationTimers.has(alertID)) {
+      clearTimeout(escalationTimers.get(alertID));
+      escalationTimers.delete(alertID);
+    }
 
     const result = trainingMode
       ? DB.resolveTrainingIncident(nodeID, alertID)
@@ -794,7 +707,10 @@ io.on('connection', (socket) => {
     if (!nodeID) return;
     
     // Clear the timer since it's now escalated manually
-    clearEscalationTimer(alertID);
+    if (alertID && escalationTimers.has(alertID)) {
+      clearTimeout(escalationTimers.get(alertID));
+      escalationTimers.delete(alertID);
+    }
 
     triggerEscalation(nodeID, alertID, trainingMode);
   });
@@ -833,8 +749,6 @@ io.on('connection', (socket) => {
     // Flush any drill timers too
     drillTimers.forEach(t => clearTimeout(t));
     drillTimers = [];
-    const clearedTimers = clearAllEscalationTimers();
-    if (clearedTimers > 0) console.log(`Cleared ${clearedTimers} pending escalation timer(s)`);
     const cleared = DB.clearIncidents();
     console.log(`Deleted ${cleared.alerts} alerts and ${cleared.dispatches} dispatch records`);
     recentIncidents.length = 0;
@@ -846,8 +760,6 @@ io.on('connection', (socket) => {
     // Also clear any active drill timers
     drillTimers.forEach(t => clearTimeout(t));
     drillTimers = [];
-    const clearedTimers = clearAllEscalationTimers();
-    if (clearedTimers > 0) console.log(`Cleared ${clearedTimers} pending escalation timer(s)`);
     const count = DB.clearTrainingData();
     console.log(`Cleared ${count} training records`);
     socket.emit('training_data_cleared', { count });

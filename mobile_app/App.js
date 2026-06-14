@@ -24,7 +24,6 @@ const decodeBase64 = (input) => {
 };
 
 const bleManager = new BleManager();
-const SOS_COOLDOWN_MS = 5 * 60 * 1000;
 const { PrahariLinkModule } = NativeModules;
 
 const hexToRgba = (hex, alpha) => {
@@ -81,7 +80,7 @@ const TRANSLATIONS = {
     resolvedTitle: 'Incident Resolved / All Clear',
     resolvedSub: 'Emergency response has successfully resolved the incident. Application lockout remains active to prevent duplicate reports.',
     lockedLabel: '🔒 ALERT LOCKOUT ACTIVE',
-    lockedDesc: 'SOS sent. Another SOS can be triggered after the five-minute cooldown.',
+    lockedDesc: 'You have already sent an alert. You cannot send another alert at this time.',
     requiredFields: 'Required Fields',
     requiredDesc: 'Both Name and Description are compulsory to send an SOS!',
   },
@@ -121,7 +120,7 @@ const TRANSLATIONS = {
     resolvedTitle: 'घटना समाधान भयो / सबै ठीक छ',
     resolvedSub: 'आपतकालीन प्रतिक्रिया सफल भएको छ। दोहोरो रिपोर्टहरू रोक्नको लागि सुरक्षा लक सक्रिय छ।',
     lockedLabel: '🔒 अलर्ट लक सक्रिय',
-    lockedDesc: 'SOS पठाइयो। पाँच मिनेटको समय सकिएपछि अर्को SOS पठाउन सकिन्छ।',
+    lockedDesc: 'तपाईंले पहिले नै अलर्ट पठाइसक्नुभएको छ। यस समयमा अर्को अलर्ट पठाउन अनुमति छैन।',
     requiredFields: 'आवश्यक विवरण',
     requiredDesc: 'एसओएस (SOS) पठाउन नाम र विवरण दुबै अनिवार्य छ!',
   },
@@ -148,6 +147,10 @@ function PoliceBrand({ lang, title, compact = false }) {
 
 export default function App() {
   const [connected, setConnected] = useState(false);
+  const connectedRef = useRef(false);
+  useEffect(() => {
+    connectedRef.current = connected;
+  }, [connected]);
   const [isSocketConnected, setIsSocketConnected] = useState(false);
   const [backendUrl, setBackendUrl] = useState('http://192.168.80.159:3001');
   const [showIpModal, setShowIpModal] = useState(false);
@@ -285,7 +288,7 @@ export default function App() {
     };
   }, [backendUrl]);
 
-  // Five-minute SOS cooldown
+  // 15-min Cooldown Timer
   const [cooldownUntil, setCooldownUntil] = useState(null);
   const [cooldownRemaining, setCooldownRemaining] = useState(null);
   const cooldownTimerRef = useRef(null);
@@ -293,14 +296,14 @@ export default function App() {
   const t = TRANSLATIONS[lang];
   const NEPALI_REASSURANCE = 'तपाईं सुरक्षित स्थानमा बस्नुहोस्। बिस्तारै सास लिनुहोस्। नेपाल प्रहरीलाई तपाईंको सूचना प्राप्त भएको छ। सहायता तपाईं तर्फ आउँदैछ।';
 
-  // ── Five-minute SOS cooldown ───────────────────────────────────────────────────────────────────────────────────────
+  // ── 15-min Cooldown Timer ───────────────────────────────────────────────
   const startCooldownTimer = (until) => {
     if (cooldownTimerRef.current) {
       clearInterval(cooldownTimerRef.current);
       cooldownTimerRef.current = null;
     }
-    const updateCooldown = () => {
-      const remaining = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+    cooldownTimerRef.current = setInterval(() => {
+      const remaining = Math.max(0, Math.floor((until - Date.now()) / 1000));
       setCooldownRemaining(remaining);
       if (remaining <= 0) {
         if (cooldownTimerRef.current) {
@@ -314,11 +317,7 @@ export default function App() {
           PrahariLinkModule.setCooldown(0);
         }
       }
-    };
-    updateCooldown();
-    if (until > Date.now()) {
-      cooldownTimerRef.current = setInterval(updateCooldown, 1000);
-    }
+    }, 1000);
   };
 
   const speakReassurance = () => {
@@ -349,14 +348,14 @@ export default function App() {
     setConnected(false);
     setBtStatus('searching');
     setSosStatus('idle');
-    setIsLocked(Boolean(cooldownUntil && cooldownUntil > Date.now()));
+    setIsLocked(false);
     setAckReceived(false);
   };
 
   const handleBackToForm = () => {
     console.log('Forcing back to form...');
     setSosStatus('idle');
-    setIsLocked(Boolean(cooldownUntil && cooldownUntil > Date.now()));
+    setIsLocked(false);
     setAckReceived(false);
     setAckDispatchInfo(null);
     if (Platform.OS === 'android' && PrahariLinkModule) {
@@ -432,6 +431,7 @@ export default function App() {
       await waitForActivity();
       const perms = [
         PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
         PermissionsAndroid.PERMISSIONS.CAMERA,
       ];
       if (Platform.Version >= 31) {
@@ -594,9 +594,9 @@ export default function App() {
         setBtStatus('failed');
         setBtErrorMessage('Relay not found. Foreground reconnection will retry automatically.');
         btRetryTimerRef.current = setTimeout(() => {
-              btRetryTimerRef.current = null;
-              scanForRelay();
-            }, 10000);
+          btRetryTimerRef.current = null;
+          scanForRelay();
+        }, 10000);
         console.log('Relay not found. Bonded:', devices.map(d => d.name), 'Searched for: Prahari-Link-V1');
       }
     } catch (err) {
@@ -680,26 +680,6 @@ export default function App() {
     const init = async () => {
       try {
         await requestPermissions();
-
-        setTimeout(() => {
-          scanForRelay();
-        }, 250);
-        btHealthTimerRef.current = setInterval(async () => {
-          try {
-            const active = await BluetoothSerial.isConnected();
-            if (!active && !btRetryTimerRef.current) await scanForRelay();
-          } catch (error) {
-            console.log('Bluetooth health check failed:', error);
-          }
-        }, 15000);
-        btConnectionLostSubscriptionRef.current = BluetoothSerial.on('connectionLost', event => {
-          console.log('BT connection lost:', event?.message || 'socket closed');
-          setConnected(false);
-          setBtStatus('searching');
-          setBtErrorMessage('Relay disconnected. Reconnecting...');
-          // The connect promise performs the controlled retry after confirming loss.
-        });
-
         try {
           const { status } = await Location.requestForegroundPermissionsAsync();
           if (status === 'granted') {
@@ -716,14 +696,14 @@ export default function App() {
         
         // Load persistent alert/incident status from Native SharedPreferences
         if (Platform.OS === 'android' && PrahariLinkModule) {
-          // Restore the five-minute cooldown after an app restart.
+          // Also load 15-min cooldown
           PrahariLinkModule.getCooldown().then(cooldownTs => {
             const now = Date.now();
             if (cooldownTs && cooldownTs > now) {
               setCooldownUntil(cooldownTs);
               setIsLocked(true);
               startCooldownTimer(cooldownTs);
-              setCooldownRemaining(Math.ceil((cooldownTs - now) / 1000));
+              setCooldownRemaining(Math.floor((cooldownTs - now) / 1000));
             }
           }).catch(() => {});
 
@@ -761,6 +741,22 @@ export default function App() {
           }).catch(err => console.log('SharedPreferences error:', err));
         }
 
+        setTimeout(async () => {
+          await scanForRelay();
+        }, 2000);
+        btHealthTimerRef.current = setInterval(async () => {
+          try {
+            if (!connectedRef.current && !btRetryTimerRef.current) await scanForRelay();
+          } catch (error) {
+            console.log('Bluetooth health check failed:', error);
+          }
+        }, 15000);
+        btConnectionLostSubscriptionRef.current = BluetoothSerial.on('connectionLost', event => {
+          console.log('BT connection lost:', event?.message || 'socket closed');
+          setConnected(false);
+          setBtStatus('searching');
+          setBtErrorMessage('Relay disconnected. Reconnecting...');
+        });
       } catch (e) { console.log('Init error:', e); }
     };
     init();
@@ -838,14 +834,11 @@ export default function App() {
 
   // Category tap: validate required fields, then run per-alert liveness verification
   const handleCategorySelect = (cat) => {
-    if (isLocked || (cooldownUntil && cooldownUntil > Date.now())) {
-      Alert.alert(t.lockedLabel, t.lockedDesc);
-      return;
-    }
     if (!connected && !isSocketConnected) {
       Alert.alert('Error', 'Not connected to Village Relay Node or Backend Server!');
       return;
     }
+    // Lockout disabled for demo
     if (citizenName.trim() === '' || userNote.trim() === '') {
       setShowValidationErrors(true);
       Alert.alert(t.requiredFields, t.requiredDesc);
@@ -877,13 +870,10 @@ export default function App() {
     
     const payload = `${type}|${lat}|${lon}|${category.id}|${safeNote}|FACE|${confidence}|${safeName}|${batteryPct}\n`;
     
-    let sent = false;
-
     // 1. Send via Bluetooth Serial if connected to ESP32 node
     if (connected) {
       try {
         await BluetoothSerial.write(payload);
-        sent = true;
       } catch (e) {
         console.warn('Failed to write to Bluetooth Serial:', e.message);
       }
@@ -907,28 +897,17 @@ export default function App() {
           status: 'active'
         };
         socketRef.current.emit('new_incident', socketPayload);
-        sent = true;
       } catch (e) {
         console.warn('Failed to emit SOS via Socket:', e.message);
       }
     }
 
-    if (!sent) {
-      Alert.alert('Send Failed', 'The SOS could not be transmitted. Please retry.');
-      return;
-    }
-
-    const cooldownExpiry = Date.now() + SOS_COOLDOWN_MS;
-    setCooldownUntil(cooldownExpiry);
-    setCooldownRemaining(Math.ceil(SOS_COOLDOWN_MS / 1000));
-    setIsLocked(true);
-    startCooldownTimer(cooldownExpiry);
-
     // Update app status to waiting for visual feedback
     setSosStatus('waiting');
+    
+    // Cooldown/Lockout disabled for demo
     if (Platform.OS === 'android' && PrahariLinkModule) {
       PrahariLinkModule.setAlertStatus('waiting');
-      PrahariLinkModule.setCooldown(cooldownExpiry);
     }
   };
 
@@ -1278,16 +1257,6 @@ export default function App() {
           </View>
           <Text style={styles.lobbyTitle}>{t.lobbyWaiting}</Text>
           <Text style={styles.lobbySubtitle}>{t.lobbySub}</Text>
-          {cooldownRemaining !== null && cooldownRemaining > 0 && (
-            <View style={styles.cooldownTimerRow}>
-              <Text style={styles.cooldownTimerIcon}>⏱</Text>
-              <Text style={styles.cooldownTimerText}>
-                {lang === 'en'
-                  ? `Next SOS available in ${Math.floor(cooldownRemaining / 60)}:${String(cooldownRemaining % 60).padStart(2, '0')}`
-                  : `अर्को SOS ${Math.floor(cooldownRemaining / 60)}:${String(cooldownRemaining % 60).padStart(2, '0')} पछि उपलब्ध हुनेछ`}
-              </Text>
-            </View>
-          )}
           
           <View style={styles.lobbyInfoCard}>
             <Text style={styles.lobbyInfoLabel}>

@@ -436,8 +436,23 @@ app.get('/api/alerts/export/csv', (req, res) => {
 });
 
 // ── Monthly Report ─────────────────────────────────────────────────────────
+function clearEscalationTimer(alertID) {
+  if (!alertID || !escalationTimers.has(alertID)) return false;
+  clearTimeout(escalationTimers.get(alertID));
+  escalationTimers.delete(alertID);
+  return true;
+}
+
+function clearAllEscalationTimers() {
+  for (const timer of escalationTimers.values()) clearTimeout(timer);
+  const count = escalationTimers.size;
+  escalationTimers.clear();
+  return count;
+}
+
 function startAutoEscalationTimer(evt) {
   if (!evt.alert_id) return;
+  clearEscalationTimer(evt.alert_id);
   const isTraining = !!evt.training;
   const timer = setTimeout(() => {
     console.log(`[AUTO-ESCALATE] Timeout reached for ${evt.nodeID} (Alert: ${evt.alert_id})`);
@@ -694,9 +709,7 @@ io.on('connection', (socket) => {
     console.log(`ACK for ${nodeID} (Alert: ${alertID})`);
 
     // Clear escalation timer if it exists
-    if (alertID && escalationTimers.has(alertID)) {
-      clearTimeout(escalationTimers.get(alertID));
-      escalationTimers.delete(alertID);
+    if (clearEscalationTimer(alertID)) {
       console.log(`[TIMER] Cleared escalation timer for alert ${alertID}`);
     }
 
@@ -755,10 +768,7 @@ io.on('connection', (socket) => {
     console.log(`Resolving: ${nodeID}`);
 
     // Also clear timer here just in case it was resolved before ACK
-    if (alertID && escalationTimers.has(alertID)) {
-      clearTimeout(escalationTimers.get(alertID));
-      escalationTimers.delete(alertID);
-    }
+    clearEscalationTimer(alertID);
 
     const result = trainingMode
       ? DB.resolveTrainingIncident(nodeID, alertID)
@@ -784,10 +794,7 @@ io.on('connection', (socket) => {
     if (!nodeID) return;
     
     // Clear the timer since it's now escalated manually
-    if (alertID && escalationTimers.has(alertID)) {
-      clearTimeout(escalationTimers.get(alertID));
-      escalationTimers.delete(alertID);
-    }
+    clearEscalationTimer(alertID);
 
     triggerEscalation(nodeID, alertID, trainingMode);
   });
@@ -826,6 +833,8 @@ io.on('connection', (socket) => {
     // Flush any drill timers too
     drillTimers.forEach(t => clearTimeout(t));
     drillTimers = [];
+    const clearedTimers = clearAllEscalationTimers();
+    if (clearedTimers > 0) console.log(`Cleared ${clearedTimers} pending escalation timer(s)`);
     const cleared = DB.clearIncidents();
     console.log(`Deleted ${cleared.alerts} alerts and ${cleared.dispatches} dispatch records`);
     recentIncidents.length = 0;
@@ -837,6 +846,8 @@ io.on('connection', (socket) => {
     // Also clear any active drill timers
     drillTimers.forEach(t => clearTimeout(t));
     drillTimers = [];
+    const clearedTimers = clearAllEscalationTimers();
+    if (clearedTimers > 0) console.log(`Cleared ${clearedTimers} pending escalation timer(s)`);
     const count = DB.clearTrainingData();
     console.log(`Cleared ${count} training records`);
     socket.emit('training_data_cleared', { count });

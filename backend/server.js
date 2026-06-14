@@ -493,8 +493,18 @@ function safeSerialWrite(data) {
 
 // ── Handle Data from Hardware ──────────────────────────────────────────────
 parser.on('data', (line) => {
-  const cleanedLine = line.toString().trim();
+  let cleanedLine = line.toString().trim();
   if (!cleanedLine) return;
+
+  // ESP32 boot/reset noise can be prepended to the first UART packet. Recover
+  // the JSON object instead of dropping a valid emergency as a hardware log.
+  const jsonStart = cleanedLine.indexOf('{');
+  if (jsonStart > 0) {
+    cleanedLine = cleanedLine.slice(jsonStart);
+  } else if (jsonStart === -1 && cleanedLine.includes('"category":') && cleanedLine.includes('"coords":')) {
+    const categoryStart = cleanedLine.indexOf('"category":');
+    cleanedLine = `{"nodeID":"NODE_A","type":"SOS",${cleanedLine.slice(categoryStart)}`;
+  }
 
   if (cleanedLine.startsWith('{')) {
     console.log('--- Hardware JSON Signal Received ---');

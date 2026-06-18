@@ -364,7 +364,7 @@ const TRANSLATIONS = {
   },
 };
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || `${window.location.protocol}//${window.location.hostname}:3001`;
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || (window.location.port ? `${window.location.protocol}//${window.location.hostname}:3001` : `${window.location.protocol}//${window.location.hostname}`);
 const OPERATOR_TOKEN = import.meta.env.VITE_OPERATOR_TOKEN || 'prahari-operator-demo-2026';
 const apiUrl = (path) => `${BACKEND_URL}${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(OPERATOR_TOKEN)}`;
 const socket = io(BACKEND_URL, {

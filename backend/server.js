@@ -37,7 +37,11 @@ function timingSafeCompare(input, expected) {
 }
 
 function sendTelegramNotification(text) {
-  const token = process.env.TELEGRAM_BOT_TOKEN || 'YOUR_TELEGRAM_BOT_TOKEN';
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    console.log('[Telegram] Notification skipped: TELEGRAM_BOT_TOKEN is not configured.');
+    return;
+  }
   const envChatId = process.env.TELEGRAM_CHAT_ID;
   const apiBase = process.env.TELEGRAM_API_BASE_URL || 'https://api.telegram.org';
 

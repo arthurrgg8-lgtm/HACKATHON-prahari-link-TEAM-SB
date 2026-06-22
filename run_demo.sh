@@ -79,6 +79,15 @@ export TELEGRAM_CHAT_ID=""
 # 2. Or, set up a custom Cloudflare Worker proxy and export the URL here (e.g. "https://my-proxy.workers.dev"):
 export TELEGRAM_API_BASE_URL="https://plink.anuditkhatri2011.workers.dev"
 
+# Load local .env overrides from backend/.env if present (ignored by Git)
+if [ -f "$BACKEND_DIR/.env" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ ! "$line" =~ ^# ]] && [[ ! -z "$line" ]]; then
+            export "$line"
+        fi
+    done < "$BACKEND_DIR/.env"
+fi
+
 # Start Backend in background
 cd "$BACKEND_DIR"
 node server.js > "$BACKEND_DIR/server_stdout.log" 2>&1 &

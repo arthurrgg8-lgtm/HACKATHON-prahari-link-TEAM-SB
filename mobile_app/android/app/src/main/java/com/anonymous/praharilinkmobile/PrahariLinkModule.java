@@ -217,6 +217,17 @@ public class PrahariLinkModule extends ReactContextBaseJavaModule {
         }
     }
 
+    @ReactMethod
+    public void getIngestToken(Promise promise) {
+        try {
+            // Retrieve Base64 obfuscated ingest token
+            byte[] decoded = android.util.Base64.decode("cHJhaGFyaS1pbmdlc3QtZGVtby0yMDI2", android.util.Base64.DEFAULT);
+            promise.resolve(new String(decoded, "UTF-8"));
+        } catch (Exception e) {
+            promise.reject("Error", e.getMessage());
+        }
+    }
+
     @Override
     public void invalidate() {
         if (textToSpeech != null) {

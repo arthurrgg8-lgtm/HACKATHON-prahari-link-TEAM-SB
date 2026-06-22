@@ -152,7 +152,7 @@ export default function App() {
     connectedRef.current = connected;
   }, [connected]);
   const [isSocketConnected, setIsSocketConnected] = useState(false);
-  const [backendUrl, setBackendUrl] = useState('http://192.168.80.159:3001');
+  const [backendUrl, setBackendUrl] = useState('http://localhost:3001');
   const [showIpModal, setShowIpModal] = useState(false);
   const [tempIpText, setTempIpText] = useState('');
   const [location, setLocation] = useState(null);
@@ -187,17 +187,29 @@ export default function App() {
   const [developerTapCount, setDeveloperTapCount] = useState(0);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
   const socketRef = useRef(null);
+  const [ingestToken, setIngestToken] = useState('prahari-ingest-demo-2026');
 
-  // Load saved backend URL on startup
+  // Load saved backend URL and ingest token on startup
   useEffect(() => {
-    if (Platform.OS === 'android' && PrahariLinkModule?.getConfigString) {
-      PrahariLinkModule.getConfigString('backend_url', 'http://192.168.80.159:3001')
-        .then(url => {
-          if (url) {
-            setBackendUrl(url);
-          }
-        })
-        .catch(err => console.log('Load config error:', err));
+    if (Platform.OS === 'android' && PrahariLinkModule) {
+      if (PrahariLinkModule.getConfigString) {
+        PrahariLinkModule.getConfigString('backend_url', 'http://localhost:3001')
+          .then(url => {
+            if (url) {
+              setBackendUrl(url);
+            }
+          })
+          .catch(err => console.log('Load config error:', err));
+      }
+      if (PrahariLinkModule.getIngestToken) {
+        PrahariLinkModule.getIngestToken()
+          .then(tok => {
+            if (tok) {
+              setIngestToken(tok);
+            }
+          })
+          .catch(err => console.log('Load ingest token error:', err));
+      }
     }
   }, []);
 
@@ -210,7 +222,7 @@ export default function App() {
 
     console.log('Connecting socket to:', backendUrl);
     socketRef.current = io(backendUrl, {
-      auth: { token: 'prahari-ingest-demo-2026' },
+      auth: { token: ingestToken },
       autoConnect: true,
       transports: ['websocket'],
     });
@@ -286,7 +298,7 @@ export default function App() {
         socketRef.current = null;
       }
     };
-  }, [backendUrl]);
+  }, [backendUrl, ingestToken]);
 
   // 15-min Cooldown Timer
   const [cooldownUntil, setCooldownUntil] = useState(null);
@@ -363,7 +375,21 @@ export default function App() {
     }
   };
 
-  const enterVolunteerMode = () => {
+  const enterVolunteerMode = async () => {
+    await requestPermissions();
+    try {
+      const locServicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!locServicesEnabled) {
+        Alert.alert(
+          lang === 'en' ? "Location Services Off" : "स्थान सेवाहरू बन्द छन्",
+          lang === 'en'
+            ? "Please enable Location services (GPS) on your device for BLE scanning to function properly."
+            : "यस उपकरणमा BLE स्क्यानिङ सञ्चालन गर्नको लागि स्थान सेवाहरू (GPS) सुचारु गर्नुहोस्।"
+        );
+      }
+    } catch (e) {
+      console.log('Location services check error:', e);
+    }
     setIsVolunteer(true);
     if (Platform.OS === 'android' && PrahariLinkModule) {
       PrahariLinkModule.startService().then(console.log).catch(console.warn);
@@ -611,58 +637,82 @@ export default function App() {
   // BLE Scan for Prahari-Link alert broadcasts
   const startBLEScan = () => {
     if (bleScanRef.current) return;
-    try {
-      bleManager.startDeviceScan(
-        null,
-        null,
-        (error, scannedDevice) => {
-          if (error) {
-            console.log('BLE scan error:', error);
-            return;
-          }
-          if (scannedDevice) {
-            const mfgData = scannedDevice.manufacturerData || '';
-            let rawMfgData = '';
-            try { rawMfgData = decodeBase64(mfgData); } catch (e) { console.log('Base64 decode error:', e); }
-            if (rawMfgData.includes('P|')) {
-              const parts = rawMfgData.split('|');
-              if (parts.length >= 4) {
-                const alertKey = `${scannedDevice.id}-${parts[2]}`;
-                setVolunteerAlerts(prev => {
-                  if (prev.some(a => a.key === alertKey)) return prev;
-                  
-                  // Buzz/Vibrate for volunteer — looping buzzer pattern
-                  Vibration.vibrate([0, 800, 400, 800], true);
-                  if (Platform.OS === 'android' && PrahariLinkModule?.playSiren) {
-                    PrahariLinkModule.playSiren().catch(e => console.log('Siren play error:', e.message));
-                  }
-                  
-                  const nodeMap = { 'A': 'NODE_A', 'B': 'NODE_B', 'C': 'NODE_C', 'L': 'CMD_CTRL' };
-                  const catMap = {
-                    'LS': 'LANDSLIDE', 'FL': 'FLOOD', 'EQ': 'EARTHQUAKE',
-                    'CR': 'CRIME', 'MD': 'MEDICAL', 'FI': 'FIRE',
-                    'MS': 'MISSING', 'DI': 'DISTURBANCE'
-                  };
-                  const catInfo = CATEGORIES.find(c => c.id === (catMap[parts[2]] || parts[2]));
-                  const newAlert = {
-                    key: alertKey,
-                    nodeID: nodeMap[parts[1]] || `NODE_${parts[1]}`,
-                    category: catMap[parts[2]] || parts[2],
-                    emoji: catInfo?.emoji || '🚨',
-                    color: catInfo?.color || '#ef4444',
-                    coords: parts[3] || 'N/A',
-                    timestamp: new Date().toLocaleTimeString(),
-                    rssi: scannedDevice.rssi,
-                  };
-                  return [newAlert, ...prev].slice(0, 10);
-                });
+    
+    const runScan = () => {
+      try {
+        bleManager.startDeviceScan(
+          null,
+          null,
+          (error, scannedDevice) => {
+            if (error) {
+              console.log('BLE scan error:', error);
+              return;
+            }
+            if (scannedDevice) {
+              const mfgData = scannedDevice.manufacturerData || '';
+              let rawMfgData = '';
+              try { rawMfgData = decodeBase64(mfgData); } catch (e) { console.log('Base64 decode error:', e); }
+              if (rawMfgData.includes('P|')) {
+                const parts = rawMfgData.split('|');
+                if (parts.length >= 4) {
+                  const alertKey = `${scannedDevice.id}-${parts[2]}`;
+                  setVolunteerAlerts(prev => {
+                    if (prev.some(a => a.key === alertKey)) return prev;
+                    
+                    // Buzz/Vibrate for volunteer — looping buzzer pattern
+                    Vibration.vibrate([0, 800, 400, 800], true);
+                    if (Platform.OS === 'android' && PrahariLinkModule?.playSiren) {
+                      PrahariLinkModule.playSiren().catch(e => console.log('Siren play error:', e.message));
+                    }
+                    
+                    const nodeMap = { 'A': 'NODE_A', 'B': 'NODE_B', 'C': 'NODE_C', 'L': 'CMD_CTRL' };
+                    const catMap = {
+                      'LS': 'LANDSLIDE', 'FL': 'FLOOD', 'EQ': 'EARTHQUAKE',
+                      'CR': 'CRIME', 'MD': 'MEDICAL', 'FI': 'FIRE',
+                      'MS': 'MISSING', 'DI': 'DISTURBANCE'
+                    };
+                    const catInfo = CATEGORIES.find(c => c.id === (catMap[parts[2]] || parts[2]));
+                    const newAlert = {
+                      key: alertKey,
+                      nodeID: nodeMap[parts[1]] || `NODE_${parts[1]}`,
+                      category: catMap[parts[2]] || parts[2],
+                      emoji: catInfo?.emoji || '🚨',
+                      color: catInfo?.color || '#ef4444',
+                      coords: parts[3] || 'N/A',
+                      timestamp: new Date().toLocaleTimeString(),
+                      rssi: scannedDevice.rssi,
+                    };
+                    return [newAlert, ...prev].slice(0, 10);
+                  });
+                }
               }
             }
           }
+        );
+        bleScanRef.current = true;
+        console.log('BLE scan started for PRAHARI-ALERT');
+      } catch (scanErr) {
+        console.log('BLE scan trigger error:', scanErr);
+      }
+    };
+
+    try {
+      bleManager.state().then(state => {
+        if (state === 'PoweredOn') {
+          runScan();
+        } else {
+          console.log('BLE Manager state is not PoweredOn:', state);
+          BluetoothSerial.enable().then(() => {
+            setTimeout(() => runScan(), 1000);
+          }).catch(err => {
+            console.log('Could not enable Bluetooth adapter:', err);
+            runScan(); // try scanning anyway
+          });
         }
-      );
-      bleScanRef.current = true;
-      console.log('BLE scan started for PRAHARI-ALERT');
+      }).catch(err => {
+        console.log('BLE state read error, scanning anyway:', err);
+        runScan();
+      });
     } catch (e) {
       console.log('BLE init error:', e);
     }
@@ -855,8 +905,9 @@ export default function App() {
       Alert.alert('Error', 'Not connected to Village Relay Node or Backend Server!');
       return;
     }
-    const lat = location?.coords?.latitude || 27.7172;
-    const lon = location?.coords?.longitude || 85.3240;
+    // Fixed demo location — always shows this spot on the map
+    const lat = 27.68950300815222;
+    const lon = 83.45855314159577;
     const safeNote = userNote.replace(/\|/g, '-');
     const safeName = (citizenName || 'Anonymous').replace(/\|/g, '-');
     const type = category.type || 'SOS';

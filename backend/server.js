@@ -4,52 +4,146 @@ const { Server } = require('socket.io');
 const { SerialPort } = require('serialport');
 const cors = require('cors');
 const { execSync } = require('child_process');
+const crypto = require('crypto');
 const DB = require('./database');
 const https = require('https');
 
-function sendTelegramNotification(text) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  if (!token || !chatId) {
-    console.log('[Telegram] Bot token or Chat ID not configured in environment. Skipping Telegram alert.');
-    return;
+// ── Security & Rate Limiting ───────────────────────────────────────────────
+const triggerRateLimit = new Map(); // IP → { count, resetTime }
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const MAX_TRIGGERS_PER_WINDOW = 30;
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const limit = triggerRateLimit.get(ip) || { count: 0, resetTime: now + RATE_LIMIT_WINDOW };
+  if (now > limit.resetTime) {
+    limit.count = 1;
+    limit.resetTime = now + RATE_LIMIT_WINDOW;
+  } else {
+    limit.count++;
   }
+  triggerRateLimit.set(ip, limit);
+  return limit.count <= MAX_TRIGGERS_PER_WINDOW;
+}
 
-  const payload = JSON.stringify({
-    chat_id: chatId,
-    text: text,
-    parse_mode: 'HTML',
-  });
+function timingSafeCompare(input, expected) {
+  if (typeof input !== 'string' || typeof expected !== 'string') return false;
+  if (input.length !== expected.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(input), Buffer.from(expected));
+  } catch (e) {
+    return false;
+  }
+}
 
-  const options = {
-    hostname: 'api.telegram.org',
-    port: 443,
-    path: `/bot${token}/sendMessage`,
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(payload),
-    },
+function sendTelegramNotification(text) {
+  const token = process.env.TELEGRAM_BOT_TOKEN || 'YOUR_TELEGRAM_BOT_TOKEN';
+  const envChatId = process.env.TELEGRAM_CHAT_ID;
+  const apiBase = process.env.TELEGRAM_API_BASE_URL || 'https://api.telegram.org';
+
+  const parsedUrl = new URL(apiBase);
+  const client = parsedUrl.protocol === 'https:' ? https : http;
+  const hostname = parsedUrl.hostname;
+  const port = parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80);
+  const basePath = parsedUrl.pathname === '/' ? '' : parsedUrl.pathname.replace(/\/$/, '');
+
+  const send = (targetChatId) => {
+    const payload = JSON.stringify({
+      chat_id: targetChatId,
+      text: text,
+      parse_mode: 'HTML',
+    });
+
+    const options = {
+      hostname: hostname,
+      port: port,
+      path: `${basePath}/bot${token}/sendMessage`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+      timeout: 5000
+    };
+
+    const req = client.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          console.log('[Telegram] Notification sent successfully!');
+        } else {
+          console.error(`[Telegram] Failed to send notification: ${res.statusCode} - ${body}`);
+        }
+      });
+    });
+
+    req.on('timeout', () => {
+      req.destroy(new Error('Connection timed out (5s)'));
+    });
+
+    req.on('error', (e) => {
+      console.error('[Telegram] Error sending notification:', e.message);
+    });
+
+    req.write(payload);
+    req.end();
   };
 
-  const req = https.request(options, (res) => {
-    let body = '';
-    res.on('data', (chunk) => { body += chunk; });
-    res.on('end', () => {
-      if (res.statusCode === 200) {
-        console.log('[Telegram] Notification sent successfully!');
-      } else {
-        console.error(`[Telegram] Failed to send notification: ${res.statusCode} - ${body}`);
-      }
+  if (envChatId && envChatId.trim() !== '') {
+    send(envChatId);
+  } else {
+    console.log('[Telegram] No Chat ID configured. Querying /getUpdates to auto-detect last active participant...');
+    const getOptions = {
+      hostname: hostname,
+      port: port,
+      path: `${basePath}/bot${token}/getUpdates`,
+      method: 'GET',
+      timeout: 5000
+    };
+    
+    const getReq = client.request(getOptions, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          if (data.ok && data.result && data.result.length > 0) {
+            let lastChatId = null;
+            // Find the most recent active message/interaction containing a chat id
+            for (let j = data.result.length - 1; j >= 0; j--) {
+              const item = data.result[j];
+              const chat = item.message?.chat || item.my_chat_member?.chat || item.callback_query?.message?.chat;
+              if (chat && chat.id) {
+                lastChatId = chat.id;
+                break;
+              }
+            }
+            if (lastChatId) {
+              console.log(`[Telegram] Auto-detected active participant Chat ID: ${lastChatId}`);
+              send(lastChatId);
+            } else {
+              console.warn('[Telegram] Could not find any valid Chat ID in the bot updates.');
+            }
+          } else {
+            console.warn('[Telegram] No updates found. ℹ️ Tip: Send a /start message to the Telegram Bot first.');
+          }
+        } catch (e) {
+          console.error('[Telegram] Failed to parse getUpdates response:', e.message);
+        }
+      });
     });
-  });
-
-  req.on('error', (e) => {
-    console.error('[Telegram] Error sending notification:', e.message);
-  });
-
-  req.write(payload);
-  req.end();
+    
+    getReq.on('timeout', () => {
+      getReq.destroy(new Error('Connection timed out (5s)'));
+    });
+    
+    getReq.on('error', (e) => {
+      console.error('[Telegram] getUpdates API query failed:', e.message);
+    });
+    
+    getReq.end();
+  }
 }
 
 const PORT = Number(process.env.PORT || 3001);
@@ -77,14 +171,23 @@ function isAllowedOrigin(origin) {
 
 function validateIncident(data) {
   if (!data || typeof data !== 'object') return 'Incident payload must be an object';
-  if (!/^[A-Z0-9_-]{1,32}$/.test(data.nodeID || '')) return 'Invalid nodeID';
+  if (typeof data.nodeID !== 'string' || !/^[A-Z0-9_-]{1,32}$/.test(data.nodeID)) return 'Invalid nodeID';
   if (data.type === 'HEARTBEAT') return null;
   if (!VALID_CATEGORIES.has(data.category)) return 'Invalid category';
+  
   const coords = data.coords || [data.lat ?? data.latitude, data.lon ?? data.longitude];
   if (!Array.isArray(coords) || coords.length < 2 || !coords.every(Number.isFinite)) return 'Invalid coordinates';
-  if (data.citizenName != null && String(data.citizenName).length > 30) return 'Citizen name too long';
-  if ((data.note != null && String(data.note).length > 99) ||
-      (data.user_note != null && String(data.user_note).length > 99)) return 'Incident note too long';
+  
+  if (data.citizenName != null) {
+    if (typeof data.citizenName !== 'string') return 'Citizen name must be a string';
+    if (data.citizenName.length > 50) return 'Citizen name too long';
+  }
+  
+  const note = data.note ?? data.user_note;
+  if (note != null) {
+    if (typeof note !== 'string') return 'Note must be a string';
+    if (note.length > 200) return 'Incident note too long';
+  }
   return null;
 }
 
@@ -95,13 +198,36 @@ const corsOptions = {
 };
 
 const app = express();
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '32kb' }));
+
 app.use('/api', (req, res, next) => {
   if (req.path === '/health') return next();
+  
   const token = req.get('x-prahari-token') || req.query.token;
   const expected = req.path === '/trigger' ? INGEST_TOKEN : OPERATOR_TOKEN;
-  if (token !== expected) return res.status(401).json({ error: 'Unauthorized' });
+  
+  if (!token || !timingSafeCompare(token, expected)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  // Rate limit SOS triggers
+  if (req.path === '/trigger') {
+    const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
+    if (!checkRateLimit(ip)) {
+      console.warn(`[RATE LIMIT] SOS trigger blocked for IP: ${ip}`);
+      return res.status(429).json({ error: 'Too many SOS triggers. Please wait a minute.' });
+    }
+  }
+  
   next();
 });
 
@@ -110,9 +236,15 @@ const io = new Server(server, { cors: corsOptions, maxHttpBufferSize: 64 * 1024 
 
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
-  if (token === OPERATOR_TOKEN) socket.data.role = 'operator';
-  else if (token === INGEST_TOKEN) socket.data.role = 'ingest';
-  else return next(new Error('Unauthorized'));
+  if (!token) return next(new Error('Unauthorized'));
+  
+  if (timingSafeCompare(token, OPERATOR_TOKEN)) {
+    socket.data.role = 'operator';
+  } else if (timingSafeCompare(token, INGEST_TOKEN)) {
+    socket.data.role = 'ingest';
+  } else {
+    return next(new Error('Unauthorized'));
+  }
   next();
 });
 const SERIAL_PORT_PATH = '/dev/ttyUSB0'; // ESP-B (Police Hub) detected here

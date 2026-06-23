@@ -653,6 +653,11 @@ function SMSAlertModal({ data, onDismiss, getCategoryInfo, openInGMaps, t, super
   const [smsPhase, setSmsPhase] = React.useState('sending');
   const [dots, setDots] = React.useState('');
 
+  const onDismissRef = React.useRef(onDismiss);
+  React.useEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
+
   React.useEffect(() => {
     const dotInterval = setInterval(() => {
       setDots(prev => prev.length >= 3 ? '' : prev + '.');
@@ -662,14 +667,14 @@ function SMSAlertModal({ data, onDismiss, getCategoryInfo, openInGMaps, t, super
       setSmsPhase('delivered');
     }, 2500);
     const autoDismiss = setTimeout(() => {
-      onDismiss();
+      onDismissRef.current();
     }, 6000);
     return () => {
       clearInterval(dotInterval);
       clearTimeout(deliveredTimer);
       clearTimeout(autoDismiss);
     };
-  }, [onDismiss]);
+  }, []);
 
   const cat = getCategoryInfo(data);
   const now = new Date().toLocaleTimeString();

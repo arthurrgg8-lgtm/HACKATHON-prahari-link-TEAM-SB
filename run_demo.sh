@@ -83,7 +83,14 @@ export TELEGRAM_API_BASE_URL="https://plink.anuditkhatri2011.workers.dev"
 if [ -f "$BACKEND_DIR/.env" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
         if [[ ! "$line" =~ ^# ]] && [[ ! -z "$line" ]]; then
-            export "$line"
+            key=$(echo "$line" | cut -d '=' -f 1)
+            val=$(echo "$line" | cut -d '=' -f 2-)
+            # Strip surrounding double or single quotes
+            val="${val%\"}"
+            val="${val#\"}"
+            val="${val%\'}"
+            val="${val#\'}"
+            export "$key=$val"
         fi
     done < "$BACKEND_DIR/.env"
 fi
